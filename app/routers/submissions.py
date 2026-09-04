@@ -7,9 +7,10 @@ from app.deps import get_current_user
 from app.jobs import JOB_HANDLERS
 from app.models import Assignment, Job, Submission, SubmissionFile, User
 from app.parsing import parse_submission_text
-from app.schemas import SubmissionPublic
+from app.schemas import JobPublic, SubmissionPublic
 
 router = APIRouter(prefix="/assignments", tags=["submissions"])
+jobs_router = APIRouter(prefix="/submissions", tags=["submissions"])
 
 
 @router.post(
@@ -68,3 +69,17 @@ async def create_submission(
     await db.commit()
     await db.refresh(submission)
     return submission
+
+
+@jobs_router.get("/{submission_id}/jobs", response_model=list[JobPublic])
+async def list_submission_jobs(
+    submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[Job]:
+    submission = await db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    result = await db.exec(select(Job).where(Job.submission_id == submission_id).order_by(Job.created_at))
+    return result.all()

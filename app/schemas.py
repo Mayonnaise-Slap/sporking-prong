@@ -92,3 +92,10 @@ class SubmissionPublic(BaseModel):
     is_empty: bool
     review_status: str
     created_at: datetime
+
+
+class JobPublic(BaseModel):
+    id: int
+    job_type: str
+    status: str
+    result: Optional[dict]

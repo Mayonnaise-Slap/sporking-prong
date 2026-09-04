@@ -9,6 +9,7 @@ from app.database import get_db, init_db
 from app.middleware import AuthMiddleware, LoggingMiddleware
 from app.routers.assignments import router as assignments_router
 from app.routers.auth import router as auth_router
+from app.routers.submissions import jobs_router as submission_jobs_router
 from app.routers.submissions import router as submissions_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -28,6 +29,7 @@ app.add_middleware(LoggingMiddleware)
 app.include_router(auth_router)
 app.include_router(assignments_router)
 app.include_router(submissions_router)
+app.include_router(submission_jobs_router)
 
 
 @app.get("/health")
