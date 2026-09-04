@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     postgres_host: str = "localhost"
     postgres_port: int = 5432
 
+    crosscheck_min_block_tokens: int = 4
+    crosscheck_merge_gap_tokens: int = 3
+    crosscheck_boilerplate_doc_ratio: float = 0.6
+    crosscheck_min_docs_for_boilerplate: int = 5
+    crosscheck_threshold_pct: float = 25.0
+    crosscheck_max_matches: int = 5
+
     secret_key: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60

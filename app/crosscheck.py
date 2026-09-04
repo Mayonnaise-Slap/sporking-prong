@@ -8,13 +8,24 @@ from typing import Optional, Sequence
 
 from rapidfuzz.distance import LCSseq
 
-MIN_BLOCK_TOKENS = 4
-MERGE_GAP_TOKENS = 3
-BOILERPLATE_DOC_RATIO = 0.6
-MIN_DOCS_FOR_BOILERPLATE = 5
-DEFAULT_FLAG_THRESHOLD_PCT = 25.0
-MAX_MATCHES = 5
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _pct(part: int, whole: int) -> float:
+    return round(100.0 * part / whole, 1) if whole else 0.0
+
+
+@dataclass(frozen=True)
+class CrossCheckConfig:
+    min_block_tokens: int = 4
+    merge_gap_tokens: int = 3
+    boilerplate_doc_ratio: float = 0.6
+    min_docs_for_boilerplate: int = 5
+    threshold_pct: float = 25.0
+    max_matches: int = 5
+
+
+DEFAULT_CONFIG = CrossCheckConfig()
 
 
 @dataclass(frozen=True)
@@ -22,6 +33,7 @@ class Document:
     submission_id: int
     words: tuple[str, ...]
     lines: tuple[int, ...]
+
     def __len__(self) -> int:
         return len(self.words)
 
@@ -32,9 +44,6 @@ class Block:
     end: int
     matched_start: int
     matched_end: int
-
-    def __len__(self) -> int:
-        return self.end - self.start
 
 
 @dataclass(frozen=True)
@@ -84,15 +93,11 @@ class CrossCheckReport:
 
     @property
     def reference_overlap_pct(self) -> float:
-        if not self.token_count:
-            return 0.0
-        return round(100.0 * self.reference_tokens / self.token_count, 1)
+        return _pct(self.reference_tokens, self.token_count)
 
     @property
     def cohort_overlap_pct(self) -> float:
-        if not self.token_count:
-            return 0.0
-        return round(100.0 * self.boilerplate_tokens / self.token_count, 1)
+        return _pct(self.boilerplate_tokens, self.token_count)
 
     def as_dict(self) -> dict:
         return {
@@ -129,20 +134,22 @@ def build_document(submission_id: int, text: str) -> Document:
     return Document(submission_id=submission_id, words=tuple(words), lines=tuple(lines))
 
 
-def align(target: Document, other: Document) -> tuple[Block, ...]:
+def align(
+    target: Document, other: Document, config: CrossCheckConfig = DEFAULT_CONFIG
+) -> tuple[Block, ...]:
     if not target.words or not other.words:
         return ()
 
     blocks: list[list[int]] = []
     for opcode in LCSseq.opcodes(target.words, other.words):
-        if opcode.tag != "equal" or opcode.src_end - opcode.src_start < MIN_BLOCK_TOKENS:
+        if opcode.tag != "equal" or opcode.src_end - opcode.src_start < config.min_block_tokens:
             continue
         run = [opcode.src_start, opcode.src_end, opcode.dest_start, opcode.dest_end]
         if blocks:
             previous = blocks[-1]
             near_in_both = (
-                run[0] - previous[1] <= MERGE_GAP_TOKENS
-                and run[2] - previous[3] <= MERGE_GAP_TOKENS
+                run[0] - previous[1] <= config.merge_gap_tokens
+                and run[2] - previous[3] <= config.merge_gap_tokens
             )
             if near_in_both:
                 previous[1], previous[3] = run[1], run[3]
@@ -168,32 +175,22 @@ def _to_spans(target: Document, other: Document, blocks: Sequence[Block]) -> tup
     )
 
 
-def _score(matched: set[int], total: int) -> float:
-    return round(100.0 * len(matched) / total, 1) if total else 0.0
-
-
-def compare(
+def _match(
     target: Document,
     other: Document,
-    ignored: frozenset[int] = frozenset(),
+    blocks: Sequence[Block],
+    ignored: frozenset[int],
 ) -> Optional[Match]:
-    blocks = align(target, other)
-    if not blocks:
-        return None
-
     considered = set(range(len(target))) - ignored
-    if not considered:
-        return None
-
     matched = _matched_indices(blocks) - ignored
-    if not matched:
+    if not blocks or not considered or not matched:
         return None
 
     spans = _to_spans(target, other, blocks)
-    longest = max(len(block) for block in blocks)
+    longest = max(block.end - block.start for block in blocks)
     return Match(
         matched_submission_id=other.submission_id,
-        similarity_pct=_score(matched, len(considered)),
+        similarity_pct=_pct(len(matched), len(considered)),
         spans=spans,
         note=f"{len(spans)} matching fragment(s), longest {longest} words",
     )
@@ -203,40 +200,42 @@ def cross_check(
     target: Document,
     cohort: Sequence[Document],
     reference_texts: Sequence[str] = (),
-    threshold_pct: float = DEFAULT_FLAG_THRESHOLD_PCT,
-    max_matches: int = MAX_MATCHES,
+    config: CrossCheckConfig = DEFAULT_CONFIG,
     cohort_complete: bool = False,
 ) -> CrossCheckReport:
-  
     others = [document for document in cohort if document.submission_id != target.submission_id]
     reference = frozenset(
         index
-        for position, text in enumerate(reference_texts)
-        for index in _matched_indices(align(target, build_document(-1 - position, text)))
+        for text in reference_texts
+        for index in _matched_indices(align(target, build_document(0, text), config))
     )
-    alignments = {other.submission_id: align(target, other) for other in others}
+    alignments = {other.submission_id: align(target, other, config) for other in others}
     boilerplate: frozenset[int] = frozenset()
-    if len(others) >= MIN_DOCS_FOR_BOILERPLATE:
+    if len(others) >= config.min_docs_for_boilerplate:
         coverage: Counter[int] = Counter()
         for blocks in alignments.values():
             coverage.update(_matched_indices(blocks) - reference)
-        cutoff = BOILERPLATE_DOC_RATIO * len(others)
+        cutoff = config.boilerplate_doc_ratio * len(others)
         boilerplate = frozenset(index for index, count in coverage.items() if count > cutoff)
 
     ignored = reference | boilerplate
-    matches = [match for match in (compare(target, other, ignored) for other in others) if match]
+    matches = [
+        match
+        for other in others
+        if (match := _match(target, other, alignments[other.submission_id], ignored))
+    ]
     matches.sort(key=lambda match: match.similarity_pct, reverse=True)
 
     considered = set(range(len(target))) - ignored
-    covered: set[int] = set()
-    for blocks in alignments.values():
-        covered |= _matched_indices(blocks) - ignored
+    covered = {
+        index for blocks in alignments.values() for index in _matched_indices(blocks)
+    } - ignored
 
     return CrossCheckReport(
         submission_id=target.submission_id,
-        overall_similarity_pct=_score(covered, len(considered)),
-        matches=tuple(matches[:max_matches]),
-        threshold_pct=threshold_pct,
+        overall_similarity_pct=_pct(len(covered), len(considered)),
+        matches=tuple(matches[: config.max_matches]),
+        threshold_pct=config.threshold_pct,
         cohort_complete=cohort_complete,
         boilerplate_filtered=bool(boilerplate),
         boilerplate_tokens=len(boilerplate),

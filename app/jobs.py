@@ -3,7 +3,8 @@ from typing import Awaitable, Callable
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.crosscheck import build_document, cross_check
+from app.config import get_settings
+from app.crosscheck import CrossCheckConfig, build_document, cross_check
 from app.models import Assignment, Job, PlagiarismMatch, Submission, _utcnow
 
 
@@ -44,10 +45,19 @@ async def run_cross_check_job(db: AsyncSession, job_id: int) -> None:
         build_document(other.id, other.processed_text)
         for other in latest_by_student.values()
     ]
+    settings = get_settings()
     report = cross_check(
         target,
         cohort,
         reference_texts=[assignment.condition_markdown],
+        config=CrossCheckConfig(
+            min_block_tokens=settings.crosscheck_min_block_tokens,
+            merge_gap_tokens=settings.crosscheck_merge_gap_tokens,
+            boilerplate_doc_ratio=settings.crosscheck_boilerplate_doc_ratio,
+            min_docs_for_boilerplate=settings.crosscheck_min_docs_for_boilerplate,
+            threshold_pct=settings.crosscheck_threshold_pct,
+            max_matches=settings.crosscheck_max_matches,
+        ),
         cohort_complete=_utcnow() >= assignment.deadline_at,
     )
 
