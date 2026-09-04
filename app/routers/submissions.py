@@ -3,7 +3,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_staff
 from app.jobs import JOB_HANDLERS
 from app.models import Assignment, Job, Submission, SubmissionFile, User
 from app.parsing import parse_submission_text
@@ -69,6 +69,22 @@ async def create_submission(
     await db.commit()
     await db.refresh(submission)
     return submission
+
+
+@router.get("/{assignment_id}/submissions", response_model=list[SubmissionPublic])
+async def list_submissions_for_assignment(
+    assignment_id: int,
+    current_user: User = Depends(require_staff),
+    db: AsyncSession = Depends(get_db),
+) -> list[Submission]:
+    assignment = await db.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+
+    result = await db.exec(
+        select(Submission).where(Submission.assignment_id == assignment_id).order_by(Submission.submitted_at.desc())
+    )
+    return result.all()
 
 
 @jobs_router.get("/{submission_id}/jobs", response_model=list[JobPublic])

@@ -1,12 +1,24 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+
+def _naive_utc(value: datetime) -> datetime:
+    # Every other datetime in the app is naive-UTC (models._utcnow()), and
+    # asyncpg refuses to insert a tz-aware value into a TIMESTAMP WITHOUT
+    # TIME ZONE column. A standards-compliant client sends an offset (e.g.
+    # trailing "Z"), so normalize rather than requiring callers to know
+    # this column is naive.
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
 
 
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
+    full_name: Optional[str] = None
     is_ta: bool = False
     is_supervisor: bool = False
 
@@ -19,6 +31,7 @@ class UserLogin(BaseModel):
 class UserPublic(BaseModel):
     id: int
     email: EmailStr
+    full_name: Optional[str]
     is_active: bool
     is_ta: bool
     is_supervisor: bool
@@ -46,6 +59,12 @@ class RubricCriterionCreate(BaseModel):
     min_points: Optional[float] = None
 
 
+class RubricCriterionUpdate(BaseModel):
+    title: Optional[str] = None
+    max_points: Optional[float] = None
+    min_points: Optional[float] = None
+
+
 class RubricCriterionPublic(BaseModel):
     id: int
     assignment_id: int
@@ -62,6 +81,24 @@ class AssignmentCreate(BaseModel):
     max_attempts: int = 3
     pass_threshold_points: float
     criteria: list[RubricCriterionCreate] = Field(min_length=1)
+
+    @field_validator("deadline_at")
+    @classmethod
+    def _validate_deadline(cls, value: datetime) -> datetime:
+        return _naive_utc(value)
+
+
+class AssignmentUpdate(BaseModel):
+    title: Optional[str] = None
+    condition_markdown: Optional[str] = None
+    deadline_at: Optional[datetime] = None
+    max_attempts: Optional[int] = None
+    pass_threshold_points: Optional[float] = None
+
+    @field_validator("deadline_at")
+    @classmethod
+    def _validate_deadline(cls, value: Optional[datetime]) -> Optional[datetime]:
+        return _naive_utc(value) if value is not None else None
 
 
 class AssignmentPublic(BaseModel):

@@ -109,7 +109,7 @@ class CriterionGrade(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     submission_id: int = Field(foreign_key="submission.id", index=True)
-    criterion_id: int = Field(foreign_key="rubric_criterion.id", index=True)
+    criterion_id: int = Field(foreign_key="rubric_criterion.id", index=True, ondelete="CASCADE")
     status: str = Field(default="unmarked")
     comment: Optional[str] = Field(default=None, sa_column=Column(Text))
     updated_at: datetime = Field(default_factory=_utcnow)
