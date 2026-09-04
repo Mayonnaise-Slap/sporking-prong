@@ -55,18 +55,15 @@ async def create_submission(
         attempt_number=attempt_number,
         original_file_id=submission_file.id,
         processed_text=processed_text,
-        processed_status="done",
+        processed_status="pending",
         line_count=len(processed_text.splitlines()),
         is_empty=len(processed_text.strip()) == 0,
     )
     db.add(submission)
     await db.flush()
 
-    for job_type, handler in JOB_HANDLERS.items():
-        job = Job(submission_id=submission.id, job_type=job_type, status="running")
-        db.add(job)
-        await db.flush()
-        await handler(db, job.id)
+    for job_type in JOB_HANDLERS:
+        db.add(Job(submission_id=submission.id, job_type=job_type, status="pending"))
 
     await db.commit()
     await db.refresh(submission)
