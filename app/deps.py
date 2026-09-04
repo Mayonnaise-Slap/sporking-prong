@@ -23,3 +23,9 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+async def require_supervisor(current_user: User = Depends(get_current_user)) -> User:
+    if not current_user.is_supervisor:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Supervisor access required")
+    return current_user
