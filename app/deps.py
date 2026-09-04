@@ -29,3 +29,9 @@ async def require_supervisor(current_user: User = Depends(get_current_user)) -> 
     if not current_user.is_supervisor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Supervisor access required")
     return current_user
+
+
+async def require_staff(current_user: User = Depends(get_current_user)) -> User:
+    if not (current_user.is_ta or current_user.is_supervisor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="TA or supervisor access required")
+    return current_user
