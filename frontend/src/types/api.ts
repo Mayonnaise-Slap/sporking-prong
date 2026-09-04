@@ -1,12 +1,13 @@
 // Request/response DTOs, matching app/schemas.py field-for-field. Distinct
 // from types/models.ts (the ORM row shape) because a few DTOs diverge from
-// their table — UserPublic drops full_name/group_label, AssignmentPublic
-// doesn't nest criteria, etc.
+// their table — UserPublic still drops group_label (nobody's asked for it
+// yet), AssignmentPublic doesn't nest criteria, etc.
 import type { Assignment, RubricCriterion } from '@/types/models'
 
 export interface UserRegisterPayload {
   email: string
   password: string
+  full_name?: string
   is_ta: boolean
   is_supervisor: boolean
 }
@@ -19,6 +20,7 @@ export interface UserLoginPayload {
 export interface UserPublic {
   id: number
   email: string
+  full_name: string | null
   is_active: boolean
   is_ta: boolean
   is_supervisor: boolean

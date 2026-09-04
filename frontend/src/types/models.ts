@@ -6,7 +6,7 @@
 export interface User {
   id: number
   email: string
-  full_name?: string | null
+  full_name: string | null
   group_label?: string | null
   is_supervisor: boolean
   is_ta: boolean

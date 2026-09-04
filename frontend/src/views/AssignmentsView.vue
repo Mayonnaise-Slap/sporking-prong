@@ -6,6 +6,7 @@ import { apiClient } from '@/api/client'
 import { extractErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import type { AssignmentWithCriteria } from '@/types/api'
+import { parseApiDate } from '@/utils/date'
 
 const assignments = ref<AssignmentWithCriteria[]>([])
 const loading = ref(true)
@@ -20,7 +21,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 })
 
 function formatDate(value: string) {
-  return dateFormatter.format(new Date(value))
+  return dateFormatter.format(parseApiDate(value))
 }
 
 function totalPoints(assignment: AssignmentWithCriteria) {

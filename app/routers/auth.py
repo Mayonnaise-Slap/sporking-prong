@@ -27,6 +27,7 @@ async def register(payload: UserRegister, db: AsyncSession = Depends(get_db)) ->
     user = User(
         email=payload.email,
         hashed_password=hash_password(payload.password),
+        full_name=payload.full_name,
         is_ta=payload.is_ta,
         is_supervisor=payload.is_supervisor,
     )

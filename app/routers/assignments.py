@@ -29,6 +29,17 @@ async def _fetch_criteria(db: AsyncSession, assignment_id: int) -> list[RubricCr
     return result.all()
 
 
+def _validate_pass_threshold(pass_threshold_points: float, total_max_points: float) -> None:
+    if pass_threshold_points > total_max_points:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"pass_threshold_points ({pass_threshold_points}) cannot exceed "
+                f"the rubric's total max points ({total_max_points})"
+            ),
+        )
+
+
 @router.get("", response_model=list[AssignmentWithCriteria])
 async def list_assignments(
     search: Optional[str] = Query(default=None, description="Case-insensitive substring match on title"),
@@ -69,6 +80,8 @@ async def create_assignment(
     current_user: User = Depends(require_supervisor),
     db: AsyncSession = Depends(get_db),
 ) -> AssignmentWithCriteria:
+    _validate_pass_threshold(payload.pass_threshold_points, sum(item.max_points for item in payload.criteria))
+
     assignment = Assignment(
         title=payload.title,
         condition_markdown=payload.condition_markdown,
@@ -117,11 +130,13 @@ async def update_assignment(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(assignment, field, value)
 
+    criteria = await _fetch_criteria(db, assignment_id)
+    _validate_pass_threshold(assignment.pass_threshold_points, sum(c.max_points for c in criteria))
+
     db.add(assignment)
     await db.commit()
     await db.refresh(assignment)
 
-    criteria = await _fetch_criteria(db, assignment_id)
     return AssignmentWithCriteria(
         **assignment.model_dump(),
         criteria=[RubricCriterionPublic(**criterion.model_dump()) for criterion in criteria],
@@ -173,6 +188,10 @@ async def update_rubric_criterion(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(criterion, field, value)
 
+    assignment = await db.get(Assignment, assignment_id)
+    criteria = await _fetch_criteria(db, assignment_id)
+    _validate_pass_threshold(assignment.pass_threshold_points, sum(c.max_points for c in criteria))
+
     db.add(criterion)
     await db.commit()
     await db.refresh(criterion)
@@ -189,6 +208,11 @@ async def delete_rubric_criterion(
     criterion = await db.get(RubricCriterion, criterion_id)
     if criterion is None or criterion.assignment_id != assignment_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rubric criterion not found")
+
+    assignment = await db.get(Assignment, assignment_id)
+    criteria = await _fetch_criteria(db, assignment_id)
+    remaining_max_points = sum(c.max_points for c in criteria if c.id != criterion_id)
+    _validate_pass_threshold(assignment.pass_threshold_points, remaining_max_points)
 
     await db.delete(criterion)
     await db.commit()

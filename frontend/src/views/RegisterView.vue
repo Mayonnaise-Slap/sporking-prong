@@ -6,6 +6,7 @@ import { extractErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 
 const email = ref('')
+const fullName = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const isTa = ref(false)
@@ -38,6 +39,7 @@ async function onSubmit() {
     await auth.register({
       email: email.value,
       password: password.value,
+      full_name: fullName.value.trim() || undefined,
       is_ta: isTa.value,
       is_supervisor: isSupervisor.value,
     })
@@ -61,6 +63,11 @@ async function onSubmit() {
       <div class="field">
         <label for="register-email">Email</label>
         <input id="register-email" v-model="email" type="email" class="input" required autocomplete="email" />
+      </div>
+
+      <div class="field">
+        <label for="register-full-name">Full name</label>
+        <input id="register-full-name" v-model="fullName" type="text" class="input" autocomplete="name" />
       </div>
 
       <div class="field">

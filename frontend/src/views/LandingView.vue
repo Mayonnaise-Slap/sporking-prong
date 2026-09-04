@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+
 const features = [
   {
     title: 'Automated pre-checks',
@@ -30,7 +34,7 @@ const features = [
         line-anchored review page with a rubric checklist and a bank of comments
         your team has already written.
       </p>
-      <div class="hero__actions">
+      <div v-if="!auth.isAuthenticated" class="hero__actions">
         <RouterLink to="/register" class="btn btn-primary">Get started</RouterLink>
         <RouterLink to="/login" class="btn btn-outline">Log in</RouterLink>
       </div>

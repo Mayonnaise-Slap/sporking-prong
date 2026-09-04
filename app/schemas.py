@@ -18,6 +18,7 @@ def _naive_utc(value: datetime) -> datetime:
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
+    full_name: Optional[str] = None
     is_ta: bool = False
     is_supervisor: bool = False
 
@@ -30,6 +31,7 @@ class UserLogin(BaseModel):
 class UserPublic(BaseModel):
     id: int
     email: EmailStr
+    full_name: Optional[str]
     is_active: bool
     is_ta: bool
     is_supervisor: bool

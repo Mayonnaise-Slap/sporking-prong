@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+
+const displayName = computed(() => auth.user?.full_name || auth.user?.email)
 
 function onLogout() {
   auth.logout()
@@ -15,15 +18,16 @@ function onLogout() {
 <template>
   <header class="app-header">
     <div class="container app-header__inner">
-      <RouterLink to="/" class="app-header__brand">
-        <span class="app-header__brand-ta">(TA)</span>co
-      </RouterLink>
+      <nav class="app-header__nav">
+        <RouterLink to="/" class="app-header__brand">
+          <span class="app-header__brand-ta">(TA)</span>co
+        </RouterLink>
+        <RouterLink to="/assignments" class="btn btn-ghost btn-sm">Assignments</RouterLink>
+      </nav>
 
       <nav class="app-header__actions">
-        <RouterLink to="/assignments" class="btn btn-ghost btn-sm">Assignments</RouterLink>
-
         <template v-if="auth.isAuthenticated">
-          <span class="app-header__user text-mono">{{ auth.user?.email }}</span>
+          <span class="app-header__user" :class="{ 'text-mono': !auth.user?.full_name }">{{ displayName }}</span>
           <button type="button" class="btn btn-ghost btn-sm" @click="onLogout">Log out</button>
         </template>
         <template v-else>
@@ -47,6 +51,12 @@ function onLogout() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.app-header__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 .app-header__brand {
