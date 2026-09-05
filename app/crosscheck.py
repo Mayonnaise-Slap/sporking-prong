@@ -8,6 +8,8 @@ from typing import Any, Optional, Sequence
 
 from rapidfuzz.distance import LCSseq
 
+from app.config import configure
+
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
 
@@ -26,14 +28,7 @@ class CrossCheckConfig:
 
     @classmethod
     def from_settings(cls, settings: Any) -> "CrossCheckConfig":
-        return cls(
-            min_block_tokens=settings.crosscheck_min_block_tokens,
-            merge_gap_tokens=settings.crosscheck_merge_gap_tokens,
-            boilerplate_doc_ratio=settings.crosscheck_boilerplate_doc_ratio,
-            min_docs_for_boilerplate=settings.crosscheck_min_docs_for_boilerplate,
-            threshold_pct=settings.crosscheck_threshold_pct,
-            max_matches=settings.crosscheck_max_matches,
-        )
+        return configure(cls, settings, "crosscheck")
 
 
 DEFAULT_CONFIG = CrossCheckConfig()

@@ -1,4 +1,6 @@
+from dataclasses import fields
 from functools import lru_cache
+from typing import Any, TypeVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -52,3 +54,20 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+T = TypeVar("T")
+
+
+def configure(cls: type[T], settings: Any, prefix: str) -> T:
+    """Build a config dataclass from the `{prefix}_{field}` settings fields.
+
+    Written out by hand, this is where a newly added field silently keeps its
+    default because nobody updated the mapping.
+    """
+    values = {
+        field.name: getattr(settings, f"{prefix}_{field.name}")
+        for field in fields(cls)
+        if hasattr(settings, f"{prefix}_{field.name}")
+    }
+    return cls(**values)

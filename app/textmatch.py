@@ -118,3 +118,11 @@ def external_references(text: str, limit: int = 10) -> tuple[str, ...]:
             if len(found) >= limit:
                 break
     return tuple(found)
+
+
+def references_block(work: str) -> str:
+    references = external_references(work)
+    if not references:
+        return ""
+    listed = "\n".join(f"[{n}] {ref}" for n, ref in enumerate(references, start=1))
+    return "\n\nВЫНЕСЕННЫЕ МАТЕРИАЛЫ (их содержимое сюда не попало):\n" + listed

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 import httpx
 
-from app.config import Settings, get_settings
+from app.config import Settings, configure, get_settings
 
 
 class LLMClient(Protocol):
@@ -19,6 +20,20 @@ class UnmarkedClient:
 
 
 SCHEMA_NAME = "response"
+
+
+def strict_object(properties: dict) -> dict:
+    """Strict json_schema mode wants closed objects with every field required."""
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(properties),
+        "properties": properties,
+    }
+
+
+def nullable_string(limit: int) -> dict:
+    return {"type": ["string", "null"], "maxLength": limit}
 
 MAX_RETRY_DELAY_SECONDS = 60.0
 
@@ -48,24 +63,18 @@ def _quota(response: httpx.Response) -> str:
     return ", ".join(parts) or "no quota headers"
 
 
+@dataclass
 class OpenAICompatibleClient:
-    def __init__(
-        self,
-        base_url: str,
-        model: str,
-        api_key: str,
-        timeout_seconds: float = 120.0,
-        max_output_tokens: int = 2000,
-        max_retries: int = 3,
-        transport: Optional[httpx.AsyncBaseTransport] = None,
-    ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.api_key = api_key
-        self.timeout_seconds = timeout_seconds
-        self.max_output_tokens = max_output_tokens
-        self.max_retries = max_retries
-        self._transport = transport
+    base_url: str
+    model: str
+    api_key: str
+    timeout_seconds: float = 120.0
+    max_output_tokens: int = 2000
+    max_retries: int = 3
+    transport: Optional[httpx.AsyncBaseTransport] = None
+
+    def __post_init__(self) -> None:
+        self.base_url = self.base_url.rstrip("/")
 
     async def complete(self, system: str, user: str, schema: dict) -> Any:
         strict = {
@@ -95,7 +104,7 @@ class OpenAICompatibleClient:
             "temperature": 0,
         }
         async with httpx.AsyncClient(
-            timeout=self.timeout_seconds, transport=self._transport
+            timeout=self.timeout_seconds, transport=self.transport
         ) as client:
             for attempt in range(self.max_retries + 1):
                 response = await client.post(
@@ -142,11 +151,4 @@ def build_llm_client(settings: Optional[Settings] = None) -> LLMClient:
     settings = settings or get_settings()
     if not settings.llm_api_key or not settings.llm_model:
         return UnmarkedClient()
-    return OpenAICompatibleClient(
-        base_url=settings.llm_base_url,
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_output_tokens=settings.llm_max_output_tokens,
-        max_retries=settings.llm_max_retries,
-    )
+    return configure(OpenAICompatibleClient, settings, "llm")
