@@ -63,7 +63,7 @@ export interface SubmissionFile {
 
 export type JobType =
   | 'heuristics'
-  | 'plagiarism'
+  | 'cross_check'
   | 'ai_detection'
   | 'common_mistake_scan'
   | 'rubric_grading'

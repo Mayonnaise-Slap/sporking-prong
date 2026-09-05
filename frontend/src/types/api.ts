@@ -129,13 +129,42 @@ export interface HeuristicsCheckItem {
   comment: string
 }
 
+// "cross_check" job's result (app/crosscheck.py CrossCheckReport.as_dict()).
+// `matches` here duplicates what GET /submissions/{id}/plagiarism-matches
+// returns (same data, persisted as PlagiarismMatch rows) — this is the
+// report-level summary (overall_similarity_pct/threshold/flagged/
+// provisional) that isn't stored anywhere else.
+export interface CrossCheckMatch {
+  matched_submission_id: number
+  similarity_pct: number
+  note: string
+  spans: Array<{ start_line: number; end_line: number; matched_start_line: number; matched_end_line: number }>
+}
+
+export interface CrossCheckReport {
+  overall_similarity_pct: number
+  threshold_pct: number
+  flagged: boolean
+  provisional: boolean
+  cohort_complete: boolean
+  cohort_size: number
+  boilerplate_filtered: boolean
+  boilerplate_tokens: number
+  cohort_overlap_pct: number
+  reference_tokens: number
+  reference_overlap_pct: number
+  matches: CrossCheckMatch[]
+}
+
 // GET /submissions/{id}/jobs — deliberately narrower than the Job ORM row:
-// no submission_id/created_at/started_at/finished_at/error_message.
+// no submission_id/created_at/started_at/finished_at/error_message. Result
+// shape is job_type-specific: a list of debrief items for "heuristics", a
+// CrossCheckReport object for "cross_check".
 export interface JobPublic {
   id: number
   job_type: string
   status: string
-  result: HeuristicsCheckItem[] | Record<string, unknown>[] | null
+  result: HeuristicsCheckItem[] | CrossCheckReport | null
 }
 
 export interface CommentCreatePayload {

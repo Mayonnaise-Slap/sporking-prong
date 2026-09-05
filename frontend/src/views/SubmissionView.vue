@@ -9,6 +9,7 @@ import type {
   CommentCreatePayload,
   CommentUpdatePayload,
   CriterionGradeView,
+  CrossCheckReport,
   FinalGradeUpsertPayload,
   HeuristicsCheckItem,
   JobPublic,
@@ -72,6 +73,11 @@ const reviewerOptions = computed(() =>
 const heuristicsChecks = computed<HeuristicsCheckItem[]>(() => {
   const job = jobs.value.find((j) => j.job_type === 'heuristics')
   return (job?.result as HeuristicsCheckItem[] | undefined) ?? []
+})
+
+const crossCheckReport = computed<CrossCheckReport | null>(() => {
+  const job = jobs.value.find((j) => j.job_type === 'cross_check')
+  return (job?.result as CrossCheckReport | undefined) ?? null
 })
 
 function criterionBadgeClass(status: string) {
@@ -482,13 +488,26 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
 
         <section v-if="isStaff" class="card card-pad">
           <p class="card-label">Plagiarism (cross-check)</p>
-          <ul v-if="plagiarismMatches.length > 0" class="review-debrief__list">
-            <li v-for="match in plagiarismMatches" :key="match.id">
-              <span class="badge" :class="match.similarity_pct >= 25 ? 'badge-danger' : 'badge-neutral'">{{ match.similarity_pct }}%</span>
-              <span class="text-muted">vs. submission #{{ match.matched_submission_id }}</span>
-              <span v-if="match.note" class="text-muted">{{ match.note }}</span>
-            </li>
-          </ul>
+          <template v-if="crossCheckReport">
+            <div class="review-debrief__badges">
+              <span class="badge" :class="crossCheckReport.flagged ? 'badge-danger' : 'badge-success'">
+                {{ crossCheckReport.overall_similarity_pct }}% overall
+              </span>
+              <span v-if="crossCheckReport.provisional" class="badge badge-neutral" title="Not every submission for this assignment has been turned in yet — this score can still change.">
+                provisional
+              </span>
+            </div>
+            <p class="text-muted review-debrief__threshold">
+              Auto-flag threshold: {{ crossCheckReport.threshold_pct }}% &middot; compared against {{ crossCheckReport.cohort_size }} other submission(s){{ crossCheckReport.reference_tokens > 0 ? ' and the assignment condition text' : '' }}
+            </p>
+            <ul v-if="plagiarismMatches.length > 0" class="review-debrief__list">
+              <li v-for="match in plagiarismMatches" :key="match.id">
+                <span class="badge" :class="match.similarity_pct >= crossCheckReport.threshold_pct ? 'badge-danger' : 'badge-neutral'">{{ match.similarity_pct }}%</span>
+                <span class="text-muted">vs. submission #{{ match.matched_submission_id }}</span>
+                <span v-if="match.note" class="text-muted">{{ match.note }}</span>
+              </li>
+            </ul>
+          </template>
           <p v-else class="text-muted">N/A &mdash; not yet evaluated.</p>
         </section>
 
@@ -723,6 +742,11 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
 .review-debrief__meta dd {
   margin: 0;
   font-weight: 600;
+}
+
+.review-debrief__threshold {
+  font-size: var(--text-xs);
+  margin: 0 0 var(--space-3);
 }
 
 .review-debrief__list {

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -148,7 +148,7 @@ class JobPublic(BaseModel):
     id: int
     job_type: str
     status: str
-    result: Optional[list]
+    result: Optional[Union[list, dict]]
 
 
 class CommentCreate(BaseModel):

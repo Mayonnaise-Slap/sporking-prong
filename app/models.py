@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy import Column, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -87,7 +87,9 @@ class Job(SQLModel, table=True):
     started_at: Optional[datetime] = Field(default=None)
     finished_at: Optional[datetime] = Field(default=None)
     error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
-    result: Optional[list] = Field(default=None, sa_column=Column(JSONB))
+    # Shape is job_type-specific: "heuristics" stores a list of debrief
+    # items, "cross_check" stores its report dict (see app/crosscheck.py).
+    result: Optional[Union[list, dict]] = Field(default=None, sa_column=Column(JSONB))
 
 
 class PlagiarismMatch(SQLModel, table=True):
