@@ -5,13 +5,14 @@ import { apiClient } from '@/api/client'
 import { extractErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import type {
+  AssignmentUpdatePayload,
   AssignmentWithCriteria,
   RubricCriterionCreatePayload,
   RubricCriterionUpdatePayload,
   SubmissionPublic,
 } from '@/types/api'
 import type { RubricCriterion } from '@/types/models'
-import { parseApiDate } from '@/utils/date'
+import { parseApiDate, toDatetimeLocalInput } from '@/utils/date'
 
 const props = defineProps<{ id: number }>()
 
@@ -48,6 +49,70 @@ async function loadAssignment() {
     loadError.value = extractErrorMessage(err, 'Could not load this assignment.')
   } finally {
     loading.value = false
+  }
+}
+
+// ---- Assignment text/settings (supervisor only) ----
+const editingAssignment = ref(false)
+const assignmentDraft = reactive({
+  title: '',
+  condition_markdown: '',
+  deadline_at: '',
+  max_attempts: 0,
+  pass_threshold_points: 0,
+})
+const assignmentEditError = ref('')
+const savingAssignment = ref(false)
+
+function startEditAssignment() {
+  if (!assignment.value) return
+  assignmentDraft.title = assignment.value.title
+  assignmentDraft.condition_markdown = assignment.value.condition_markdown
+  assignmentDraft.deadline_at = toDatetimeLocalInput(parseApiDate(assignment.value.deadline_at))
+  assignmentDraft.max_attempts = assignment.value.max_attempts
+  assignmentDraft.pass_threshold_points = assignment.value.pass_threshold_points
+  assignmentEditError.value = ''
+  editingAssignment.value = true
+}
+
+function cancelEditAssignment() {
+  editingAssignment.value = false
+}
+
+async function saveAssignmentEdit() {
+  if (!assignment.value) return
+
+  const payload: AssignmentUpdatePayload = {}
+  if (assignmentDraft.title !== assignment.value.title) payload.title = assignmentDraft.title
+  if (assignmentDraft.condition_markdown !== assignment.value.condition_markdown) {
+    payload.condition_markdown = assignmentDraft.condition_markdown
+  }
+  const draftDeadline = new Date(assignmentDraft.deadline_at)
+  if (draftDeadline.getTime() !== parseApiDate(assignment.value.deadline_at).getTime()) {
+    payload.deadline_at = draftDeadline.toISOString()
+  }
+  if (assignmentDraft.max_attempts !== assignment.value.max_attempts) {
+    payload.max_attempts = assignmentDraft.max_attempts
+  }
+  if (assignmentDraft.pass_threshold_points !== assignment.value.pass_threshold_points) {
+    payload.pass_threshold_points = assignmentDraft.pass_threshold_points
+  }
+
+  if (Object.keys(payload).length === 0) {
+    editingAssignment.value = false
+    return
+  }
+
+  assignmentEditError.value = ''
+  savingAssignment.value = true
+  try {
+    const { data } = await apiClient.patch<AssignmentWithCriteria>(`/assignments/${assignment.value.id}`, payload)
+    assignment.value = data
+    editingAssignment.value = false
+  } catch (err) {
+    assignmentEditError.value = extractErrorMessage(err, 'Could not save this assignment.')
+  } finally {
+    savingAssignment.value = false
   }
 }
 
@@ -223,8 +288,76 @@ onMounted(async () => {
 
       <div class="detail-grid">
         <section class="card card-pad">
-          <p class="card-label">Condition</p>
-          <pre class="detail-condition text-mono">{{ assignment.condition_markdown }}</pre>
+          <div class="condition-card__head">
+            <p class="card-label">Condition</p>
+            <button
+              v-if="isSupervisor && !editingAssignment"
+              type="button"
+              class="btn btn-outline btn-sm"
+              @click="startEditAssignment"
+            >
+              Edit assignment
+            </button>
+          </div>
+
+          <pre v-if="!editingAssignment" class="detail-condition text-mono">{{ assignment.condition_markdown }}</pre>
+
+          <form v-else class="assignment-edit" @submit.prevent="saveAssignmentEdit">
+            <p v-if="assignmentEditError" class="form-banner form-banner-error">{{ assignmentEditError }}</p>
+
+            <div class="field">
+              <label for="assignment-edit-title">Title</label>
+              <input id="assignment-edit-title" v-model="assignmentDraft.title" type="text" class="input" required />
+            </div>
+
+            <div class="field">
+              <label for="assignment-edit-condition">Condition (Markdown)</label>
+              <textarea id="assignment-edit-condition" v-model="assignmentDraft.condition_markdown" class="textarea" required></textarea>
+            </div>
+
+            <div class="assignment-edit__row">
+              <div class="field">
+                <label for="assignment-edit-deadline">Deadline</label>
+                <input
+                  id="assignment-edit-deadline"
+                  v-model="assignmentDraft.deadline_at"
+                  type="datetime-local"
+                  class="input"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="assignment-edit-max-attempts">Max attempts</label>
+                <input
+                  id="assignment-edit-max-attempts"
+                  v-model.number="assignmentDraft.max_attempts"
+                  type="number"
+                  min="1"
+                  class="input"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="assignment-edit-pass-threshold">Pass threshold (pts)</label>
+                <input
+                  id="assignment-edit-pass-threshold"
+                  v-model.number="assignmentDraft.pass_threshold_points"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  class="input"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary btn-sm" :disabled="savingAssignment">
+                {{ savingAssignment ? 'Saving…' : 'Save' }}
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" @click="cancelEditAssignment">Cancel</button>
+            </div>
+          </form>
         </section>
 
         <section class="card card-pad">
@@ -378,10 +511,25 @@ onMounted(async () => {
 }
 
 .detail-condition {
+  margin: 0;
   white-space: pre-wrap;
   font-size: var(--text-sm);
   max-height: 420px;
   overflow-y: auto;
+}
+
+.condition-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.assignment-edit__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
 }
 
 .criteria-list {

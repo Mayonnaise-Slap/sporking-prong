@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -7,10 +9,21 @@ from app.deps import get_current_user, require_staff
 from app.jobs import JOB_HANDLERS
 from app.models import Assignment, Job, Submission, SubmissionFile, User
 from app.parsing import parse_submission_text
-from app.schemas import JobPublic, SubmissionPublic
+from app.schemas import JobPublic, SubmissionPublic, SubmissionUpdate
 
 router = APIRouter(prefix="/assignments", tags=["submissions"])
-jobs_router = APIRouter(prefix="/submissions", tags=["submissions"])
+submission_router = APIRouter(prefix="/submissions", tags=["submissions"])
+
+
+async def _build_submission_public(
+    db: AsyncSession, submission: Submission, student: Optional[User] = None
+) -> SubmissionPublic:
+    if student is None:
+        student = await db.get(User, submission.student_id)
+    return SubmissionPublic(
+        **submission.model_dump(),
+        student_full_name=student.full_name if student else None,
+    )
 
 
 @router.post(
@@ -23,7 +36,7 @@ async def create_submission(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Submission:
+) -> SubmissionPublic:
     assignment = await db.get(Assignment, assignment_id)
     if assignment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -68,7 +81,7 @@ async def create_submission(
 
     await db.commit()
     await db.refresh(submission)
-    return submission
+    return await _build_submission_public(db, submission, current_user)
 
 
 @router.get("/{assignment_id}/submissions", response_model=list[SubmissionPublic])
@@ -76,7 +89,7 @@ async def list_submissions_for_assignment(
     assignment_id: int,
     current_user: User = Depends(require_staff),
     db: AsyncSession = Depends(get_db),
-) -> list[Submission]:
+) -> list[SubmissionPublic]:
     assignment = await db.get(Assignment, assignment_id)
     if assignment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
@@ -84,10 +97,56 @@ async def list_submissions_for_assignment(
     result = await db.exec(
         select(Submission).where(Submission.assignment_id == assignment_id).order_by(Submission.submitted_at.desc())
     )
-    return result.all()
+    submissions = result.all()
+    if not submissions:
+        return []
+
+    students_result = await db.exec(select(User).where(User.id.in_({s.student_id for s in submissions})))
+    students_by_id = {student.id: student for student in students_result.all()}
+
+    return [await _build_submission_public(db, s, students_by_id.get(s.student_id)) for s in submissions]
 
 
-@jobs_router.get("/{submission_id}/jobs", response_model=list[JobPublic])
+@submission_router.get("/{submission_id}", response_model=SubmissionPublic)
+async def get_submission(
+    submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionPublic:
+    submission = await db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    return await _build_submission_public(db, submission)
+
+
+@submission_router.patch("/{submission_id}", response_model=SubmissionPublic)
+async def update_submission(
+    submission_id: int,
+    payload: SubmissionUpdate,
+    current_user: User = Depends(require_staff),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionPublic:
+    submission = await db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "assigned_reviewer_id" in updates and updates["assigned_reviewer_id"] is not None:
+        reviewer = await db.get(User, updates["assigned_reviewer_id"])
+        if reviewer is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reviewer not found")
+
+    for field, value in updates.items():
+        setattr(submission, field, value)
+
+    db.add(submission)
+    await db.commit()
+    await db.refresh(submission)
+    return await _build_submission_public(db, submission)
+
+
+@submission_router.get("/{submission_id}/jobs", response_model=list[JobPublic])
 async def list_submission_jobs(
     submission_id: int,
     current_user: User = Depends(get_current_user),

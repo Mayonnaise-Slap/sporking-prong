@@ -8,3 +8,12 @@
 export function parseApiDate(value: string): Date {
   return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value}Z`)
 }
+
+// Inverse direction: format a Date as a `datetime-local` input value
+// ("YYYY-MM-DDTHH:mm") in the viewer's own local time, so editing a deadline
+// shows the same local time the read-only views already display via
+// parseApiDate + Intl.DateTimeFormat.
+export function toDatetimeLocalInput(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}

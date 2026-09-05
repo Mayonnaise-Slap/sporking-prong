@@ -66,6 +66,16 @@ export interface AssignmentCreatePayload {
   criteria: RubricCriterionCreatePayload[]
 }
 
+// PATCH /assignments/{id} — same exclude_unset semantics as
+// RubricCriterionUpdatePayload: only send the keys that actually changed.
+export interface AssignmentUpdatePayload {
+  title?: string
+  condition_markdown?: string
+  deadline_at?: string
+  max_attempts?: number
+  pass_threshold_points?: number
+}
+
 export type AssignmentWithCriteria = Assignment & { criteria: RubricCriterion[] }
 
 // GET/POST .../submissions response shape (SubmissionPublic) — narrower than
