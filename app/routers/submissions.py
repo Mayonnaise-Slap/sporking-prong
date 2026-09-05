@@ -6,7 +6,7 @@ from app.database import get_db
 from app.deps import get_current_user, require_staff
 from app.jobs import JOB_HANDLERS
 from app.models import Assignment, Job, Submission, SubmissionFile, User
-from app.parsing import parse_submission_text
+from app.parsing import UnsupportedSubmissionFormat, parse_submission_text
 from app.schemas import JobPublic, SubmissionPublic
 
 router = APIRouter(prefix="/assignments", tags=["submissions"])
@@ -39,7 +39,13 @@ async def create_submission(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Maximum attempts exceeded")
 
     content = await file.read()
-    processed_text = parse_submission_text(content)
+    try:
+        processed_text = parse_submission_text(content)
+    except UnsupportedSubmissionFormat as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(exc),
+        ) from exc
 
     submission_file = SubmissionFile(
         original_filename=file.filename or "upload.txt",
