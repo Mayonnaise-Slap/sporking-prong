@@ -1,43 +1,14 @@
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from rapidfuzz import fuzz
 
 DEFAULT_MATCH_THRESHOLD = 75.0
 
-_URL_RE = re.compile(r"https?://\S+")
-_OFFLOAD_RE = re.compile(
-    r"(?:в|во|на)\s+(?:отдельн\w+\s+)?"
-    r"(?:excel\w*|экселе|google\s*sheets?|таблиц\w+|вкладк\w+|приложени\w+|вложени\w+|файл\w+)"
-    r"|см\.?\s*(?:таблиц\w+|приложени\w+|файл\w+)",
-    re.IGNORECASE,
-)
-
 _ELLIPSIS_RE = re.compile(r"\s*(?:\.{3}|…)\s*")
 _FRAGMENT_RE = re.compile(r"«([^»]{6,})»|\*\*([^*]{6,})\*\*|`([^`]{6,})`|\"([^\"]{6,})\"")
-
-
-def clean_text(value: Any, limit: int) -> Optional[str]:
-    text = " ".join(value.split()) if isinstance(value, str) else ""
-    return text[:limit].rstrip() or None
-
-
-def as_object(payload: Any, what: str) -> dict:
-    if isinstance(payload, str):
-        payload = json.loads(payload)
-    if not isinstance(payload, dict):
-        raise ValueError(f"{what} response must be a JSON object")
-    return payload
-
-
-def as_list(payload: dict, key: str, what: str) -> list:
-    items = payload.get(key)
-    if not isinstance(items, list):
-        raise ValueError(f"{what} response must contain a list of {key}")
-    return items
 
 
 def _fold(text: str) -> str:
@@ -105,24 +76,3 @@ def _locate(needle: str, flat: _Flat, threshold: float) -> tuple[Optional[int], 
             return found
 
     return None, None
-
-
-def external_references(text: str, limit: int = 10) -> tuple[str, ...]:
-    found: list[str] = []
-    for number, line in enumerate(text.splitlines(), start=1):
-        collapsed = " ".join(line.split())
-        if not collapsed:
-            continue
-        if _URL_RE.search(collapsed) or _OFFLOAD_RE.search(collapsed):
-            found.append(f"стр. {number}: {collapsed[:200]}")
-            if len(found) >= limit:
-                break
-    return tuple(found)
-
-
-def references_block(work: str) -> str:
-    references = external_references(work)
-    if not references:
-        return ""
-    listed = "\n".join(f"[{n}] {ref}" for n, ref in enumerate(references, start=1))
-    return "\n\nВЫНЕСЕННЫЕ МАТЕРИАЛЫ (их содержимое сюда не попало):\n" + listed

@@ -4,10 +4,10 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import get_settings
-from app.critic import CriticConfig, Finding, critique
+from app.critic import CriticConfig, Finding
 from app.crosscheck import CrossCheckConfig, build_document, cross_check
-from app.grader import Criterion, GraderConfig, Verdict, grade, points_range
-from app.textmatch import external_references
+from app.grader import Criterion, GraderConfig, Verdict
+from app.review import review_submission
 from app.llm import build_llm_client
 from app.models import (
     Assignment,
@@ -181,58 +181,19 @@ async def run_grader_job(db: AsyncSession, job_id: int) -> None:
     criteria = await _load_criteria(db, assignment.id)
 
     settings = get_settings()
-    client = build_llm_client(settings)
-    findings = await critique(
-        client,
-        assignment.condition_markdown,
-        submission.processed_text,
-        CriticConfig.from_settings(settings),
-    )
-    draft = await grade(
-        client,
+    review = await review_submission(
+        build_llm_client(settings),
         assignment.condition_markdown,
         criteria,
         submission.processed_text,
-        findings,
+        CriticConfig.from_settings(settings),
         GraderConfig.from_settings(settings),
     )
 
-    comments_written = await _replace_draft_comments(db, job, submission, findings)
-    applied = await _apply_grades(db, submission, draft.verdicts)
-    points_low, points_high = points_range(draft.verdicts, criteria)
+    comments_written = await _replace_draft_comments(db, job, submission, review.findings)
+    applied = await _apply_grades(db, submission, review.verdicts)
 
-    job.result = {
-        "summary": draft.summary,
-        "points_low": points_low,
-        "points_high": points_high,
-        "comments_written": comments_written,
-        "external_references": list(external_references(submission.processed_text)),
-        "findings": [
-            {
-                "severity": finding.severity,
-                "problem": finding.problem,
-                "why_it_matters": finding.why_it_matters,
-                "quote": finding.quote,
-                "start_line": finding.start_line,
-                "end_line": finding.end_line,
-            }
-            for finding in findings
-        ],
-        "verdicts": [
-            {
-                "criterion_id": verdict.criterion_id,
-                "status": verdict.status,
-                "points": verdict.points,
-                "comment": verdict.comment,
-                "evidence": verdict.evidence,
-                "evidence_start_line": verdict.evidence_start_line,
-                "evidence_end_line": verdict.evidence_end_line,
-                "finding_ids": list(verdict.finding_ids),
-                "applied": verdict.criterion_id in applied,
-            }
-            for verdict in draft.verdicts
-        ],
-    }
+    job.result = review.as_dict(applied=applied, comments_written=comments_written)
     job.status = "succeeded"
     job.finished_at = _utcnow()
     db.add(job)
