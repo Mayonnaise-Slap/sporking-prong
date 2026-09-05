@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -105,6 +105,30 @@ async def list_submissions_for_assignment(
     students_by_id = {student.id: student for student in students_result.all()}
 
     return [await _build_submission_public(db, s, students_by_id.get(s.student_id)) for s in submissions]
+
+
+@submission_router.get("", response_model=list[SubmissionPublic])
+async def list_my_submissions(
+    student_id: Optional[int] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SubmissionPublic]:
+    target_id = student_id if student_id is not None else current_user.id
+
+    if target_id != current_user.id and not (current_user.is_ta or current_user.is_supervisor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="TA or supervisor access required")
+
+    if target_id == current_user.id:
+        student = current_user
+    else:
+        student = await db.get(User, target_id)
+        if student is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    result = await db.exec(
+        select(Submission).where(Submission.student_id == target_id).order_by(Submission.submitted_at.desc())
+    )
+    return [await _build_submission_public(db, s, student) for s in result.all()]
 
 
 @submission_router.get("/{submission_id}", response_model=SubmissionPublic)

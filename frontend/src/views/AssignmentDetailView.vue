@@ -425,16 +425,18 @@ onMounted(async () => {
         <p v-else-if="submissionsLoading" class="text-muted">Loading…</p>
         <p v-else-if="submissions.length === 0" class="text-muted">No submissions yet.</p>
         <ul v-else class="submission-list">
-          <li v-for="submission in submissions" :key="submission.id" class="submission-row">
-            <span class="text-mono">Student #{{ submission.student_id }}</span>
-            <span class="text-muted">attempt {{ submission.attempt_number }}</span>
-            <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
-            <span class="badge" :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'">
-              {{ submission.processed_status }}
-            </span>
-            <span class="badge badge-neutral">{{ submission.review_status }}</span>
-            <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
-            <span class="text-muted">{{ submission.line_count ?? 0 }} lines</span>
+          <li v-for="submission in submissions" :key="submission.id">
+            <RouterLink :to="`/submissions/${submission.id}`" class="submission-row">
+              <span class="text-mono">{{ submission.student_full_name || `Student #${submission.student_id}` }}</span>
+              <span class="text-muted">attempt {{ submission.attempt_number }}</span>
+              <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
+              <span class="badge" :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'">
+                {{ submission.processed_status }}
+              </span>
+              <span class="badge badge-neutral">{{ submission.review_status }}</span>
+              <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
+              <span class="text-muted">{{ submission.line_count ?? 0 }} lines</span>
+            </RouterLink>
           </li>
         </ul>
       </section>
@@ -444,6 +446,7 @@ onMounted(async () => {
         <p v-if="lastSubmission" class="form-banner form-banner-success">
           Submitted as attempt {{ lastSubmission.attempt_number }} of {{ assignment.max_attempts }},
           {{ formatDate(lastSubmission.submitted_at) }}.
+          <RouterLink :to="`/submissions/${lastSubmission.id}`">View submission</RouterLink>
         </p>
         <p v-if="submitError" class="form-banner form-banner-error">{{ submitError }}</p>
         <form @submit.prevent="submitFile">
@@ -604,17 +607,30 @@ onMounted(async () => {
   gap: var(--space-1);
 }
 
+.submission-list li {
+  border-top: 1px solid var(--color-border);
+}
+
+.submission-list li:first-child {
+  border-top: none;
+}
+
 .submission-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) 0;
-  border-top: 1px solid var(--color-border);
   font-size: var(--text-sm);
+  color: inherit;
 }
 
-.submission-row:first-child {
-  border-top: none;
+.submission-row:hover {
+  text-decoration: none;
+  color: inherit;
+}
+
+.submission-row:hover .text-mono {
+  text-decoration: underline;
 }
 </style>

@@ -87,7 +87,7 @@ class Job(SQLModel, table=True):
     started_at: Optional[datetime] = Field(default=None)
     finished_at: Optional[datetime] = Field(default=None)
     error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
-    result: Optional[dict] = Field(default=None, sa_column=Column(JSONB))
+    result: Optional[list] = Field(default=None, sa_column=Column(JSONB))
 
 
 class PlagiarismMatch(SQLModel, table=True):
