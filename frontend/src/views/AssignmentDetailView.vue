@@ -202,6 +202,11 @@ async function addCriterion() {
 }
 
 // ---- Submissions (TA or supervisor) ----
+type SubmissionsFilter = 'assigned' | 'all'
+// TAs default to their own queue; supervisors default to the full list —
+// "assigned to me" is a much less useful first view for someone who isn't
+// usually an assigned reviewer.
+const submissionsFilter = ref<SubmissionsFilter>(auth.user?.is_ta ? 'assigned' : 'all')
 const submissions = ref<SubmissionPublic[]>([])
 const submissionsLoading = ref(false)
 const submissionsError = ref('')
@@ -211,13 +216,25 @@ async function loadSubmissions() {
   submissionsLoading.value = true
   submissionsError.value = ''
   try {
-    const { data } = await apiClient.get<SubmissionPublic[]>(`/assignments/${assignment.value.id}/submissions`)
+    const params =
+      submissionsFilter.value === 'assigned' && auth.user
+        ? { assigned_reviewer_id: auth.user.id, reviewed: false }
+        : undefined
+    const { data } = await apiClient.get<SubmissionPublic[]>(`/assignments/${assignment.value.id}/submissions`, {
+      params,
+    })
     submissions.value = data
   } catch (err) {
     submissionsError.value = extractErrorMessage(err, 'Could not load submissions.')
   } finally {
     submissionsLoading.value = false
   }
+}
+
+function setSubmissionsFilter(filter: SubmissionsFilter) {
+  if (submissionsFilter.value === filter) return
+  submissionsFilter.value = filter
+  loadSubmissions()
 }
 
 // ---- Submit a file (everyone else) ----
@@ -420,21 +437,55 @@ onMounted(async () => {
       </div>
 
       <section v-if="isStaff" class="card card-pad">
-        <p class="card-label">Submissions</p>
+        <div class="submissions-head">
+          <p class="card-label">Submissions</p>
+          <div class="submissions-filter">
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="submissionsFilter === 'assigned' ? 'btn-primary' : 'btn-outline'"
+              @click="setSubmissionsFilter('assigned')"
+            >
+              Assigned to me
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="submissionsFilter === 'all' ? 'btn-primary' : 'btn-outline'"
+              @click="setSubmissionsFilter('all')"
+            >
+              All
+            </button>
+          </div>
+        </div>
+
         <p v-if="submissionsError" class="form-banner form-banner-error">{{ submissionsError }}</p>
         <p v-else-if="submissionsLoading" class="text-muted">Loading…</p>
-        <p v-else-if="submissions.length === 0" class="text-muted">No submissions yet.</p>
+        <p v-else-if="submissions.length === 0" class="text-muted">
+          {{ submissionsFilter === 'assigned' ? 'Nothing assigned to you right now.' : 'No submissions yet.' }}
+        </p>
         <ul v-else class="submission-list">
-          <li v-for="submission in submissions" :key="submission.id" class="submission-row">
-            <span class="text-mono">Student #{{ submission.student_id }}</span>
-            <span class="text-muted">attempt {{ submission.attempt_number }}</span>
-            <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
-            <span class="badge" :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'">
-              {{ submission.processed_status }}
-            </span>
-            <span class="badge badge-neutral">{{ submission.review_status }}</span>
-            <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
-            <span class="text-muted">{{ submission.line_count ?? 0 }} lines</span>
+          <li v-for="submission in submissions" :key="submission.id">
+            <RouterLink :to="`/submissions/${submission.id}`" class="submission-row">
+              <span class="text-mono">{{ submission.student_full_name || `Student #${submission.student_id}` }}</span>
+              <span class="text-muted">attempt {{ submission.attempt_number }}</span>
+              <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
+              <span
+                class="badge"
+                :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'"
+                title="Whether the background job pipeline (heuristics, etc.) has finished running on this submission yet."
+              >
+                Preprocessing: {{ submission.processed_status }}
+              </span>
+              <span
+                class="badge badge-neutral"
+                title="Where this submission stands in the review queue: pending, in review, or reviewed."
+              >
+                Review: {{ submission.review_status }}
+              </span>
+              <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
+              <span class="text-muted">{{ submission.line_count ?? 0 }} lines</span>
+            </RouterLink>
           </li>
         </ul>
       </section>
@@ -444,6 +495,7 @@ onMounted(async () => {
         <p v-if="lastSubmission" class="form-banner form-banner-success">
           Submitted as attempt {{ lastSubmission.attempt_number }} of {{ assignment.max_attempts }},
           {{ formatDate(lastSubmission.submitted_at) }}.
+          <RouterLink :to="`/submissions/${lastSubmission.id}`">View submission</RouterLink>
         </p>
         <p v-if="submitError" class="form-banner form-banner-error">{{ submitError }}</p>
         <form @submit.prevent="submitFile">
@@ -595,6 +647,20 @@ onMounted(async () => {
   min-width: 100px;
 }
 
+.submissions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.submissions-filter {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .submission-list {
   list-style: none;
   margin: 0;
@@ -604,17 +670,30 @@ onMounted(async () => {
   gap: var(--space-1);
 }
 
+.submission-list li {
+  border-top: 1px solid var(--color-border);
+}
+
+.submission-list li:first-child {
+  border-top: none;
+}
+
 .submission-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) 0;
-  border-top: 1px solid var(--color-border);
   font-size: var(--text-sm);
+  color: inherit;
 }
 
-.submission-row:first-child {
-  border-top: none;
+.submission-row:hover {
+  text-decoration: none;
+  color: inherit;
+}
+
+.submission-row:hover .text-mono {
+  text-decoration: underline;
 }
 </style>

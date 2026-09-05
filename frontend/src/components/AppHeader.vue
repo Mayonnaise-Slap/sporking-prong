@@ -8,6 +8,7 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const displayName = computed(() => auth.user?.full_name || auth.user?.email)
+const isStudent = computed(() => auth.isAuthenticated && !auth.user?.is_ta && !auth.user?.is_supervisor)
 
 function onLogout() {
   auth.logout()
@@ -23,6 +24,7 @@ function onLogout() {
           <span class="app-header__brand-ta">(TA)</span>co
         </RouterLink>
         <RouterLink to="/assignments" class="btn btn-ghost btn-sm">Assignments</RouterLink>
+        <RouterLink v-if="isStudent" to="/my-submissions" class="btn btn-ghost btn-sm">My submissions</RouterLink>
       </nav>
 
       <nav class="app-header__actions">

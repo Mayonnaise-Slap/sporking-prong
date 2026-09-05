@@ -10,6 +10,7 @@ from app.database import get_db, init_db
 from app.middleware import AuthMiddleware, LoggingMiddleware
 from app.routers.assignments import router as assignments_router
 from app.routers.auth import router as auth_router
+from app.routers.auth import users_router
 from app.routers.comments import comment_router
 from app.routers.comments import router as comments_router
 from app.routers.grading import router as grading_router
@@ -40,6 +41,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(users_router)
 app.include_router(assignments_router)
 app.include_router(submissions_router)
 app.include_router(submission_router)

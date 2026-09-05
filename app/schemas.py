@@ -38,6 +38,12 @@ class UserPublic(BaseModel):
     created_at: datetime
 
 
+class UserListItem(BaseModel):
+    id: int
+    full_name: Optional[str]
+    email: EmailStr
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -142,7 +148,7 @@ class JobPublic(BaseModel):
     id: int
     job_type: str
     status: str
-    result: Optional[dict]
+    result: Optional[list]
 
 
 class CommentCreate(BaseModel):
