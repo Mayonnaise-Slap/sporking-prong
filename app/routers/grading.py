@@ -51,7 +51,12 @@ async def list_criterion_grades(
                 max_points=criterion.max_points,
                 min_points=criterion.min_points,
                 status=grade.status if grade else "unmarked",
+                points=grade.points if grade else None,
+                source=grade.source if grade else "reviewer",
                 comment=grade.comment if grade else None,
+                evidence=grade.evidence if grade else None,
+                evidence_start_line=grade.evidence_start_line if grade else None,
+                evidence_end_line=grade.evidence_end_line if grade else None,
                 updated_at=grade.updated_at if grade else None,
             )
         )

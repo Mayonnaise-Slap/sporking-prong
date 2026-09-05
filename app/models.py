@@ -113,7 +113,12 @@ class CriterionGrade(SQLModel, table=True):
     submission_id: int = Field(foreign_key="submission.id", index=True)
     criterion_id: int = Field(foreign_key="rubric_criterion.id", index=True, ondelete="CASCADE")
     status: str = Field(default="unmarked")
+    points: Optional[float] = Field(default=None)
+    source: str = Field(default="reviewer")
     comment: Optional[str] = Field(default=None, sa_column=Column(Text))
+    evidence: Optional[str] = Field(default=None, sa_column=Column(Text))
+    evidence_start_line: Optional[int] = Field(default=None)
+    evidence_end_line: Optional[int] = Field(default=None)
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -137,8 +142,7 @@ class FinalGrade(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     submission_id: int = Field(foreign_key="submission.id", unique=True)
-    # App layer must enforce points <= sum(RubricCriterion.max_points) for the assignment.
     points: float
     assigned_by_id: int = Field(foreign_key="user.id")
     assigned_at: datetime = Field(default_factory=_utcnow)
-    next_step: str = Field(default="grade")  # "grade" | "remediate"
+    next_step: str = Field(default="grade")

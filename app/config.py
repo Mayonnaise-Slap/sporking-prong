@@ -19,6 +19,24 @@ class Settings(BaseSettings):
     crosscheck_threshold_pct: float = 25.0
     crosscheck_max_matches: int = 5
 
+    grader_max_comment_chars: int = 200
+    grader_max_summary_chars: int = 1200
+    grader_max_evidence_chars: int = 300
+    grader_match_threshold: float = 75.0
+
+    critic_max_quote_chars: int = 300
+    critic_max_problem_chars: int = 300
+    critic_max_why_chars: int = 200
+    critic_max_findings: int = 20
+    critic_match_threshold: float = 75.0
+
+    llm_base_url: str = "https://api.cerebras.ai/v1"
+    llm_model: str = ""
+    llm_api_key: str = ""
+    llm_timeout_seconds: float = 120.0
+    llm_max_output_tokens: int = 6000
+    llm_max_retries: int = 3
+
     secret_key: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60

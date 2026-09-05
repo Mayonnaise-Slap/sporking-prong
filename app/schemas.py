@@ -187,7 +187,12 @@ class CriterionGradeView(BaseModel):
     max_points: float
     min_points: Optional[float]
     status: str
+    points: Optional[float]
+    source: str
     comment: Optional[str]
+    evidence: Optional[str]
+    evidence_start_line: Optional[int]
+    evidence_end_line: Optional[int]
     updated_at: Optional[datetime]
 
 
