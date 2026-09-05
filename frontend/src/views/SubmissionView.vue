@@ -48,6 +48,7 @@ const comments = ref<CommentModel[]>([])
 const criterionGrades = ref<CriterionGradeView[]>([])
 const plagiarismMatches = ref<PlagiarismMatchPublic[]>([])
 const finalGrade = ref<FinalGrade | null>(null)
+const users = ref<UserListItem[]>([])
 const userNameById = ref<Record<number, string>>({})
 
 const loading = ref(true)
@@ -59,6 +60,14 @@ function userLabel(userId: number | null, fallbackPrefix = 'User') {
   if (userId === null) return null
   return userNameById.value[userId] ?? `${fallbackPrefix} #${userId}`
 }
+
+// For the reviewer picker — every registered user, sorted for a stable,
+// scannable dropdown. GET /users carries no role flags, so this can't be
+// filtered down to TAs/supervisors only (matches the backend's own lack of
+// a role check on assigned_reviewer_id).
+const reviewerOptions = computed(() =>
+  [...users.value].sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email)),
+)
 
 const heuristicsChecks = computed<HeuristicsCheckItem[]>(() => {
   const job = jobs.value.find((j) => j.job_type === 'heuristics')
@@ -78,53 +87,37 @@ function criterionBadgeClass(status: string) {
   }
 }
 
-// TODO(mock data): remove once app/jobs.py grows a common_mistake_scan
-// handler. Nothing generates a real source_job_id-linked suggestion yet, so
-// without this the "auto-suggested" comment styling would never be
-// demonstrable against live data. Negative id marks it as non-real (never
-// sent to the backend, no edit/delete controls rendered for it).
-const MOCK_SUGGESTED_COMMENT: CommentModel = {
-  id: -1,
-  submission_id: -1,
-  start_line: 1,
-  end_line: 2,
-  body: 'This looks like a mistake already flagged in 6 other submissions for this assignment: the interface contract is missing its error-response shape.',
-  author_id: null,
-  source_comment_id: null,
-  source_job_id: -1,
-  status: 'suggested',
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  sent_at: null,
-}
-
-const displayComments = computed(() => {
-  const hasRealSuggestion = comments.value.some((c) => c.source_job_id !== null)
-  return hasRealSuggestion ? comments.value : [...comments.value, MOCK_SUGGESTED_COMMENT]
-})
-
 const commentsByEndLine = computed(() => {
   const map: Record<number, CommentModel[]> = {}
-  for (const c of displayComments.value) {
+  for (const c of comments.value) {
     ;(map[c.end_line] ??= []).push(c)
   }
   return map
 })
 
-// TODO(mock data): remove once app/jobs.py grows a plagiarism handler —
-// PlagiarismMatch has no producer yet, so the real list is always empty.
-const MOCK_PLAGIARISM_MATCH: PlagiarismMatchPublic = {
-  id: -1,
-  matched_submission_id: -1,
-  similarity_pct: 34.5,
-  matched_spans: null,
-  note: 'Only in boilerplate requirement wording — likely a false positive.',
-  created_at: new Date().toISOString(),
-}
+const draftComments = computed(() => comments.value.filter((c) => c.status === 'draft'))
+const postingAllDrafts = ref(false)
+const postAllError = ref('')
 
-const displayPlagiarismMatches = computed(() =>
-  plagiarismMatches.value.length > 0 ? plagiarismMatches.value : [MOCK_PLAGIARISM_MATCH],
-)
+async function postAllDrafts() {
+  if (draftComments.value.length === 0) return
+
+  postAllError.value = ''
+  postingAllDrafts.value = true
+  try {
+    const updated = await Promise.all(
+      draftComments.value.map((c) => apiClient.patch<CommentModel>(`/comments/${c.id}`, { status: 'sent' })),
+    )
+    for (const { data } of updated) {
+      const index = comments.value.findIndex((c) => c.id === data.id)
+      if (index !== -1) comments.value[index] = data
+    }
+  } catch (err) {
+    postAllError.value = extractErrorMessage(err, 'Could not post all comments.')
+  } finally {
+    postingAllDrafts.value = false
+  }
+}
 
 // ---- GitHub-style drag-to-select-lines commenting (TA only) ----
 const dragStartLine = ref<number | null>(null)
@@ -177,7 +170,7 @@ interface LineRangeInfo {
 // a neutral "selecting" pseudo-status.
 const lineRangeInfo = computed<Record<number, LineRangeInfo>>(() => {
   const map: Record<number, LineRangeInfo> = {}
-  for (const c of displayComments.value) {
+  for (const c of comments.value) {
     for (let ln = c.start_line; ln <= c.end_line; ln++) {
       map[ln] = { status: c.status, isStart: ln === c.start_line, isEnd: ln === c.end_line }
     }
@@ -336,15 +329,16 @@ async function loadAll() {
     submission.value = sub
     initReviewDraft()
 
-    const [{ data: assignmentData }, { data: jobsData }, { data: users }] = await Promise.all([
+    const [{ data: assignmentData }, { data: jobsData }, { data: userList }] = await Promise.all([
       apiClient.get<AssignmentWithCriteria>(`/assignments/${sub.assignment_id}`),
       apiClient.get<JobPublic[]>(`/submissions/${props.id}/jobs`),
       apiClient.get<UserListItem[]>('/users'),
     ])
     assignment.value = assignmentData
     jobs.value = jobsData
+    users.value = userList
     userNameById.value = Object.fromEntries(
-      users.filter((u) => u.full_name).map((u) => [u.id, u.full_name as string]),
+      userList.filter((u) => u.full_name).map((u) => [u.id, u.full_name as string]),
     )
 
     if (isStaff.value) {
@@ -388,28 +382,59 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
           {{ submission.student_full_name || `Student #${submission.student_id}` }}
           <span class="text-muted review-topbar__attempt">attempt {{ submission.attempt_number }} of {{ assignment.max_attempts }}</span>
         </h1>
-        <RouterLink
-          v-if="isStaff"
-          :to="{
-            path: `/students/${submission.student_id}/submissions`,
-            query: submission.student_full_name ? { name: submission.student_full_name } : {},
-          }"
-          class="review-topbar__history-link"
-        >
-          View all submissions by this student
-        </RouterLink>
+        <div class="review-topbar__actions">
+          <button
+            v-if="canGrade && draftComments.length > 0"
+            type="button"
+            class="btn btn-primary btn-sm"
+            :disabled="postingAllDrafts"
+            @click="postAllDrafts"
+          >
+            {{ postingAllDrafts ? 'Posting…' : `Post all comments (${draftComments.length})` }}
+          </button>
+          <RouterLink
+            v-if="isStaff"
+            :to="{
+              path: `/students/${submission.student_id}/submissions`,
+              query: submission.student_full_name ? { name: submission.student_full_name } : {},
+            }"
+            class="review-topbar__history-link"
+          >
+            View all submissions by this student
+          </RouterLink>
+        </div>
       </div>
+      <p v-if="postAllError" class="form-banner form-banner-error">{{ postAllError }}</p>
 
       <!-- High-level signals, ahead of the text (features/img.png's debrief header row) -->
       <div class="review-debrief">
         <section class="card card-pad">
           <p class="card-label">Submission</p>
           <div class="review-debrief__badges">
-            <span class="badge" :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'">
-              {{ submission.processed_status }}
+            <span
+              class="badge"
+              :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'"
+              title="Whether the background job pipeline (heuristics, etc.) has finished running on this submission yet."
+            >
+              Preprocessing: {{ submission.processed_status }}
             </span>
-            <span class="badge badge-neutral">{{ submission.review_status }}</span>
-            <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
+            <span
+              class="badge badge-neutral"
+              title="Where this submission stands in the review queue: pending, in review, or reviewed."
+            >
+              Review: {{ submission.review_status }}
+            </span>
+            <span
+              v-if="isStaff"
+              class="badge"
+              :class="finalGrade ? 'badge-success' : 'badge-neutral'"
+              title="Whether a final grade has been recorded for this submission yet."
+            >
+              Grade: {{ finalGrade ? 'done' : 'pending' }}
+            </span>
+            <span v-if="submission.is_empty" class="badge badge-danger" title="The submitted file had no non-whitespace content.">
+              empty file
+            </span>
           </div>
           <dl class="review-debrief__meta">
             <div>
@@ -441,8 +466,13 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
               </select>
             </div>
             <div class="field">
-              <label for="reviewer-id">Reviewer (user id)</label>
-              <input id="reviewer-id" v-model.number="reviewerIdDraft" type="number" min="1" class="input" placeholder="unassigned" />
+              <label for="reviewer-id">Reviewer</label>
+              <select id="reviewer-id" v-model="reviewerIdDraft" class="input">
+                <option :value="null">Unassigned</option>
+                <option v-for="user in reviewerOptions" :key="user.id" :value="user.id">
+                  {{ user.full_name || user.email }}
+                </option>
+              </select>
             </div>
             <button type="submit" class="btn btn-primary btn-sm" :disabled="savingReview">
               {{ savingReview ? 'Saving…' : 'Save' }}
@@ -452,14 +482,14 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
 
         <section v-if="isStaff" class="card card-pad">
           <p class="card-label">Plagiarism (cross-check)</p>
-          <ul class="review-debrief__list">
-            <li v-for="match in displayPlagiarismMatches" :key="match.id">
-              <span v-if="match.id < 0" class="badge badge-neutral">preview &mdash; no plagiarism job yet</span>
+          <ul v-if="plagiarismMatches.length > 0" class="review-debrief__list">
+            <li v-for="match in plagiarismMatches" :key="match.id">
               <span class="badge" :class="match.similarity_pct >= 25 ? 'badge-danger' : 'badge-neutral'">{{ match.similarity_pct }}%</span>
               <span class="text-muted">vs. submission #{{ match.matched_submission_id }}</span>
               <span v-if="match.note" class="text-muted">{{ match.note }}</span>
             </li>
           </ul>
+          <p v-else class="text-muted">N/A &mdash; not yet evaluated.</p>
         </section>
 
         <section class="card card-pad">
@@ -520,7 +550,6 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
                     {{ comment.status }}
                   </span>
                   <span v-if="comment.source_job_id" class="badge badge-primary">auto-suggested</span>
-                  <span v-if="comment.id < 0" class="badge badge-neutral">preview &mdash; no real suggestions yet</span>
                   <span class="text-muted">{{ userLabel(comment.author_id) ?? 'unassigned' }}</span>
                 </div>
 
@@ -539,7 +568,7 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
                 </div>
                 <p v-else class="review-comment__body">{{ comment.body }}</p>
 
-                <div v-if="canGrade && comment.id >= 0 && editingCommentId !== comment.id" class="review-comment__actions">
+                <div v-if="canGrade && editingCommentId !== comment.id" class="review-comment__actions">
                   <button type="button" class="btn btn-outline btn-sm" @click="startEditComment(comment)">Edit</button>
                   <button type="button" class="btn btn-outline btn-sm" @click="removeComment(comment)">Delete</button>
                 </div>
@@ -653,9 +682,15 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
   font-weight: 400;
 }
 
+.review-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+}
+
 .review-topbar__history-link {
   font-size: var(--text-sm);
-  margin-left: auto;
 }
 
 /* ---- Debrief row ---- */

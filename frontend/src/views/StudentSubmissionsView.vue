@@ -85,10 +85,19 @@ onMounted(() => {
           <span class="submission-row__title">{{ assignmentTitle(submission.assignment_id) }}</span>
           <span class="text-muted">attempt {{ submission.attempt_number }}</span>
           <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
-          <span class="badge" :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'">
-            {{ submission.processed_status }}
+          <span
+            class="badge"
+            :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'"
+            title="Whether the background job pipeline (heuristics, etc.) has finished running on this submission yet."
+          >
+            Preprocessing: {{ submission.processed_status }}
           </span>
-          <span class="badge badge-neutral">{{ submission.review_status }}</span>
+          <span
+            class="badge badge-neutral"
+            title="Where this submission stands in the review queue: pending, in review, or reviewed."
+          >
+            Review: {{ submission.review_status }}
+          </span>
         </RouterLink>
       </li>
     </ul>

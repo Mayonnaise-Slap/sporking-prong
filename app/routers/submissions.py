@@ -87,6 +87,8 @@ async def create_submission(
 @router.get("/{assignment_id}/submissions", response_model=list[SubmissionPublic])
 async def list_submissions_for_assignment(
     assignment_id: int,
+    assigned_reviewer_id: Optional[int] = Query(default=None),
+    reviewed: Optional[bool] = Query(default=None, description="True = review_status=='reviewed', False = not yet"),
     current_user: User = Depends(require_staff),
     db: AsyncSession = Depends(get_db),
 ) -> list[SubmissionPublic]:
@@ -94,9 +96,16 @@ async def list_submissions_for_assignment(
     if assignment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
 
-    result = await db.exec(
-        select(Submission).where(Submission.assignment_id == assignment_id).order_by(Submission.submitted_at.desc())
-    )
+    statement = select(Submission).where(Submission.assignment_id == assignment_id)
+    if assigned_reviewer_id is not None:
+        statement = statement.where(Submission.assigned_reviewer_id == assigned_reviewer_id)
+    if reviewed is not None:
+        if reviewed:
+            statement = statement.where(Submission.review_status == "reviewed")
+        else:
+            statement = statement.where(Submission.review_status != "reviewed")
+
+    result = await db.exec(statement.order_by(Submission.submitted_at.desc()))
     submissions = result.all()
     if not submissions:
         return []

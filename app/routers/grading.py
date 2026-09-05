@@ -120,6 +120,11 @@ async def upsert_final_grade(
         final_grade.assigned_by_id = current_user.id
         final_grade.assigned_at = _utcnow()
 
+    if payload.next_step == "grade":
+        submission.review_status = "reviewed"
+        submission.reviewed_at = _utcnow()
+        db.add(submission)
+
     db.add(final_grade)
     await db.commit()
     await db.refresh(final_grade)
