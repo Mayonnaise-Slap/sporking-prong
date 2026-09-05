@@ -9,10 +9,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import User
-from app.schemas import RestoreConfirm, RestoreRequest, Token, UserLogin, UserPublic, UserRegister
+from app.schemas import RestoreConfirm, RestoreRequest, Token, UserListItem, UserLogin, UserPublic, UserRegister
 from app.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+users_router = APIRouter(tags=["users"])
 logger = logging.getLogger("app.auth")
 
 RESTORE_CODE_TTL_MINUTES = 15
@@ -99,3 +100,9 @@ async def restore_confirm(payload: RestoreConfirm, db: AsyncSession = Depends(ge
     await db.commit()
 
     return {"detail": "Password has been reset."}
+
+
+@users_router.get("/users", response_model=list[UserListItem])
+async def list_users(db: AsyncSession = Depends(get_db)) -> list[User]:
+    result = await db.exec(select(User).order_by(User.id))
+    return result.all()

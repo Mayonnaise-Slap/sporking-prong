@@ -87,7 +87,7 @@ class Job(SQLModel, table=True):
     started_at: Optional[datetime] = Field(default=None)
     finished_at: Optional[datetime] = Field(default=None)
     error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
-    result: Optional[dict] = Field(default=None, sa_column=Column(JSONB))
+    result: Optional[list] = Field(default=None, sa_column=Column(JSONB))
 
 
 class PlagiarismMatch(SQLModel, table=True):
@@ -122,7 +122,7 @@ class Comment(SQLModel, table=True):
     end_line: int
     body: str = Field(sa_column=Column(Text, nullable=False))
     author_id: Optional[int] = Field(default=None, foreign_key="user.id")
-    source_comment_id: Optional[int] = Field(default=None, foreign_key="comment.id")
+    source_comment_id: Optional[int] = Field(default=None, foreign_key="comment.id", ondelete="SET NULL")
     source_job_id: Optional[int] = Field(default=None, foreign_key="job.id")
     status: str = Field(default="draft")
     created_at: datetime = Field(default_factory=_utcnow)

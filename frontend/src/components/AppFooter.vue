@@ -9,7 +9,7 @@ const year = new Date().getFullYear()
       <nav class="app-footer__links">
         <RouterLink to="/">Home</RouterLink>
         <RouterLink to="/styleguide">Style guide</RouterLink>
-        <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/Mayonnaise-Slap/sporking-prong" target="_blank" rel="noopener noreferrer">GitHub</a>
       </nav>
     </div>
   </footer>

@@ -5,13 +5,14 @@ import { apiClient } from '@/api/client'
 import { extractErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import type {
+  AssignmentUpdatePayload,
   AssignmentWithCriteria,
   RubricCriterionCreatePayload,
   RubricCriterionUpdatePayload,
   SubmissionPublic,
 } from '@/types/api'
 import type { RubricCriterion } from '@/types/models'
-import { parseApiDate } from '@/utils/date'
+import { parseApiDate, toDatetimeLocalInput } from '@/utils/date'
 
 const props = defineProps<{ id: number }>()
 
@@ -48,6 +49,70 @@ async function loadAssignment() {
     loadError.value = extractErrorMessage(err, 'Could not load this assignment.')
   } finally {
     loading.value = false
+  }
+}
+
+// ---- Assignment text/settings (supervisor only) ----
+const editingAssignment = ref(false)
+const assignmentDraft = reactive({
+  title: '',
+  condition_markdown: '',
+  deadline_at: '',
+  max_attempts: 0,
+  pass_threshold_points: 0,
+})
+const assignmentEditError = ref('')
+const savingAssignment = ref(false)
+
+function startEditAssignment() {
+  if (!assignment.value) return
+  assignmentDraft.title = assignment.value.title
+  assignmentDraft.condition_markdown = assignment.value.condition_markdown
+  assignmentDraft.deadline_at = toDatetimeLocalInput(parseApiDate(assignment.value.deadline_at))
+  assignmentDraft.max_attempts = assignment.value.max_attempts
+  assignmentDraft.pass_threshold_points = assignment.value.pass_threshold_points
+  assignmentEditError.value = ''
+  editingAssignment.value = true
+}
+
+function cancelEditAssignment() {
+  editingAssignment.value = false
+}
+
+async function saveAssignmentEdit() {
+  if (!assignment.value) return
+
+  const payload: AssignmentUpdatePayload = {}
+  if (assignmentDraft.title !== assignment.value.title) payload.title = assignmentDraft.title
+  if (assignmentDraft.condition_markdown !== assignment.value.condition_markdown) {
+    payload.condition_markdown = assignmentDraft.condition_markdown
+  }
+  const draftDeadline = new Date(assignmentDraft.deadline_at)
+  if (draftDeadline.getTime() !== parseApiDate(assignment.value.deadline_at).getTime()) {
+    payload.deadline_at = draftDeadline.toISOString()
+  }
+  if (assignmentDraft.max_attempts !== assignment.value.max_attempts) {
+    payload.max_attempts = assignmentDraft.max_attempts
+  }
+  if (assignmentDraft.pass_threshold_points !== assignment.value.pass_threshold_points) {
+    payload.pass_threshold_points = assignmentDraft.pass_threshold_points
+  }
+
+  if (Object.keys(payload).length === 0) {
+    editingAssignment.value = false
+    return
+  }
+
+  assignmentEditError.value = ''
+  savingAssignment.value = true
+  try {
+    const { data } = await apiClient.patch<AssignmentWithCriteria>(`/assignments/${assignment.value.id}`, payload)
+    assignment.value = data
+    editingAssignment.value = false
+  } catch (err) {
+    assignmentEditError.value = extractErrorMessage(err, 'Could not save this assignment.')
+  } finally {
+    savingAssignment.value = false
   }
 }
 
@@ -137,6 +202,11 @@ async function addCriterion() {
 }
 
 // ---- Submissions (TA or supervisor) ----
+type SubmissionsFilter = 'assigned' | 'all'
+// TAs default to their own queue; supervisors default to the full list —
+// "assigned to me" is a much less useful first view for someone who isn't
+// usually an assigned reviewer.
+const submissionsFilter = ref<SubmissionsFilter>(auth.user?.is_ta ? 'assigned' : 'all')
 const submissions = ref<SubmissionPublic[]>([])
 const submissionsLoading = ref(false)
 const submissionsError = ref('')
@@ -146,13 +216,25 @@ async function loadSubmissions() {
   submissionsLoading.value = true
   submissionsError.value = ''
   try {
-    const { data } = await apiClient.get<SubmissionPublic[]>(`/assignments/${assignment.value.id}/submissions`)
+    const params =
+      submissionsFilter.value === 'assigned' && auth.user
+        ? { assigned_reviewer_id: auth.user.id, reviewed: false }
+        : undefined
+    const { data } = await apiClient.get<SubmissionPublic[]>(`/assignments/${assignment.value.id}/submissions`, {
+      params,
+    })
     submissions.value = data
   } catch (err) {
     submissionsError.value = extractErrorMessage(err, 'Could not load submissions.')
   } finally {
     submissionsLoading.value = false
   }
+}
+
+function setSubmissionsFilter(filter: SubmissionsFilter) {
+  if (submissionsFilter.value === filter) return
+  submissionsFilter.value = filter
+  loadSubmissions()
 }
 
 // ---- Submit a file (everyone else) ----
@@ -223,8 +305,76 @@ onMounted(async () => {
 
       <div class="detail-grid">
         <section class="card card-pad">
-          <p class="card-label">Condition</p>
-          <pre class="detail-condition text-mono">{{ assignment.condition_markdown }}</pre>
+          <div class="condition-card__head">
+            <p class="card-label">Condition</p>
+            <button
+              v-if="isSupervisor && !editingAssignment"
+              type="button"
+              class="btn btn-outline btn-sm"
+              @click="startEditAssignment"
+            >
+              Edit assignment
+            </button>
+          </div>
+
+          <pre v-if="!editingAssignment" class="detail-condition text-mono">{{ assignment.condition_markdown }}</pre>
+
+          <form v-else class="assignment-edit" @submit.prevent="saveAssignmentEdit">
+            <p v-if="assignmentEditError" class="form-banner form-banner-error">{{ assignmentEditError }}</p>
+
+            <div class="field">
+              <label for="assignment-edit-title">Title</label>
+              <input id="assignment-edit-title" v-model="assignmentDraft.title" type="text" class="input" required />
+            </div>
+
+            <div class="field">
+              <label for="assignment-edit-condition">Condition (Markdown)</label>
+              <textarea id="assignment-edit-condition" v-model="assignmentDraft.condition_markdown" class="textarea" required></textarea>
+            </div>
+
+            <div class="assignment-edit__row">
+              <div class="field">
+                <label for="assignment-edit-deadline">Deadline</label>
+                <input
+                  id="assignment-edit-deadline"
+                  v-model="assignmentDraft.deadline_at"
+                  type="datetime-local"
+                  class="input"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="assignment-edit-max-attempts">Max attempts</label>
+                <input
+                  id="assignment-edit-max-attempts"
+                  v-model.number="assignmentDraft.max_attempts"
+                  type="number"
+                  min="1"
+                  class="input"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="assignment-edit-pass-threshold">Pass threshold (pts)</label>
+                <input
+                  id="assignment-edit-pass-threshold"
+                  v-model.number="assignmentDraft.pass_threshold_points"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  class="input"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary btn-sm" :disabled="savingAssignment">
+                {{ savingAssignment ? 'Saving…' : 'Save' }}
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" @click="cancelEditAssignment">Cancel</button>
+            </div>
+          </form>
         </section>
 
         <section class="card card-pad">
@@ -287,21 +437,55 @@ onMounted(async () => {
       </div>
 
       <section v-if="isStaff" class="card card-pad">
-        <p class="card-label">Submissions</p>
+        <div class="submissions-head">
+          <p class="card-label">Submissions</p>
+          <div class="submissions-filter">
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="submissionsFilter === 'assigned' ? 'btn-primary' : 'btn-outline'"
+              @click="setSubmissionsFilter('assigned')"
+            >
+              Assigned to me
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="submissionsFilter === 'all' ? 'btn-primary' : 'btn-outline'"
+              @click="setSubmissionsFilter('all')"
+            >
+              All
+            </button>
+          </div>
+        </div>
+
         <p v-if="submissionsError" class="form-banner form-banner-error">{{ submissionsError }}</p>
         <p v-else-if="submissionsLoading" class="text-muted">Loading…</p>
-        <p v-else-if="submissions.length === 0" class="text-muted">No submissions yet.</p>
+        <p v-else-if="submissions.length === 0" class="text-muted">
+          {{ submissionsFilter === 'assigned' ? 'Nothing assigned to you right now.' : 'No submissions yet.' }}
+        </p>
         <ul v-else class="submission-list">
-          <li v-for="submission in submissions" :key="submission.id" class="submission-row">
-            <span class="text-mono">Student #{{ submission.student_id }}</span>
-            <span class="text-muted">attempt {{ submission.attempt_number }}</span>
-            <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
-            <span class="badge" :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'">
-              {{ submission.processed_status }}
-            </span>
-            <span class="badge badge-neutral">{{ submission.review_status }}</span>
-            <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
-            <span class="text-muted">{{ submission.line_count ?? 0 }} lines</span>
+          <li v-for="submission in submissions" :key="submission.id">
+            <RouterLink :to="`/submissions/${submission.id}`" class="submission-row">
+              <span class="text-mono">{{ submission.student_full_name || `Student #${submission.student_id}` }}</span>
+              <span class="text-muted">attempt {{ submission.attempt_number }}</span>
+              <span class="text-muted">{{ formatDate(submission.submitted_at) }}</span>
+              <span
+                class="badge"
+                :class="submission.processed_status === 'done' ? 'badge-success' : 'badge-neutral'"
+                title="Whether the background job pipeline (heuristics, etc.) has finished running on this submission yet."
+              >
+                Preprocessing: {{ submission.processed_status }}
+              </span>
+              <span
+                class="badge badge-neutral"
+                title="Where this submission stands in the review queue: pending, in review, or reviewed."
+              >
+                Review: {{ submission.review_status }}
+              </span>
+              <span v-if="submission.is_empty" class="badge badge-danger">empty file</span>
+              <span class="text-muted">{{ submission.line_count ?? 0 }} lines</span>
+            </RouterLink>
           </li>
         </ul>
       </section>
@@ -311,6 +495,7 @@ onMounted(async () => {
         <p v-if="lastSubmission" class="form-banner form-banner-success">
           Submitted as attempt {{ lastSubmission.attempt_number }} of {{ assignment.max_attempts }},
           {{ formatDate(lastSubmission.submitted_at) }}.
+          <RouterLink :to="`/submissions/${lastSubmission.id}`">View submission</RouterLink>
         </p>
         <p v-if="submitError" class="form-banner form-banner-error">{{ submitError }}</p>
         <form @submit.prevent="submitFile">
@@ -378,10 +563,25 @@ onMounted(async () => {
 }
 
 .detail-condition {
+  margin: 0;
   white-space: pre-wrap;
   font-size: var(--text-sm);
   max-height: 420px;
   overflow-y: auto;
+}
+
+.condition-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.assignment-edit__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
 }
 
 .criteria-list {
@@ -447,6 +647,20 @@ onMounted(async () => {
   min-width: 100px;
 }
 
+.submissions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.submissions-filter {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .submission-list {
   list-style: none;
   margin: 0;
@@ -456,17 +670,30 @@ onMounted(async () => {
   gap: var(--space-1);
 }
 
+.submission-list li {
+  border-top: 1px solid var(--color-border);
+}
+
+.submission-list li:first-child {
+  border-top: none;
+}
+
 .submission-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) 0;
-  border-top: 1px solid var(--color-border);
   font-size: var(--text-sm);
+  color: inherit;
 }
 
-.submission-row:first-child {
-  border-top: none;
+.submission-row:hover {
+  text-decoration: none;
+  color: inherit;
+}
+
+.submission-row:hover .text-mono {
+  text-decoration: underline;
 }
 </style>

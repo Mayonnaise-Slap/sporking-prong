@@ -74,6 +74,22 @@ async def list_assignments(
     ]
 
 
+@router.get("/{assignment_id}", response_model=AssignmentWithCriteria)
+async def get_assignment(
+    assignment_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentWithCriteria:
+    assignment = await db.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+
+    criteria = await _fetch_criteria(db, assignment_id)
+    return AssignmentWithCriteria(
+        **assignment.model_dump(),
+        criteria=[RubricCriterionPublic(**criterion.model_dump()) for criterion in criteria],
+    )
+
+
 @router.post("", response_model=AssignmentWithCriteria, status_code=status.HTTP_201_CREATED)
 async def create_assignment(
     payload: AssignmentCreate,

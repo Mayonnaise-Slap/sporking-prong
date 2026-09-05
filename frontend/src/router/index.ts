@@ -53,6 +53,23 @@ const router = createRouter({
       props: (to) => ({ id: Number(to.params.id) }),
     },
     {
+      path: '/submissions/:id',
+      name: 'submission-detail',
+      component: () => import('@/views/SubmissionView.vue'),
+      props: (to) => ({ id: Number(to.params.id) }),
+    },
+    {
+      path: '/my-submissions',
+      name: 'my-submissions',
+      component: () => import('@/views/StudentSubmissionsView.vue'),
+    },
+    {
+      path: '/students/:studentId/submissions',
+      name: 'student-submissions',
+      component: () => import('@/views/StudentSubmissionsView.vue'),
+      props: (to) => ({ studentId: Number(to.params.studentId) }),
+    },
+    {
       path: '/styleguide',
       name: 'styleguide',
       component: () => import('@/views/StyleGuideView.vue'),
