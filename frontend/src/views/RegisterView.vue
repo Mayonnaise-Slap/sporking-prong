@@ -5,12 +5,13 @@ import { useRouter } from 'vue-router'
 import { extractErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 
+type Role = 'student' | 'ta' | 'supervisor'
+
 const email = ref('')
 const fullName = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const isTa = ref(false)
-const isSupervisor = ref(false)
+const role = ref<Role>('student')
 const error = ref('')
 const submitting = ref(false)
 
@@ -40,8 +41,8 @@ async function onSubmit() {
       email: email.value,
       password: password.value,
       full_name: fullName.value.trim() || undefined,
-      is_ta: isTa.value,
-      is_supervisor: isSupervisor.value,
+      is_ta: role.value === 'ta',
+      is_supervisor: role.value === 'supervisor',
     })
     router.push('/assignments')
   } catch (err) {
@@ -96,21 +97,33 @@ async function onSubmit() {
         />
       </div>
 
-      <label class="checkbox-field">
-        <input v-model="isTa" type="checkbox" />
-        <span class="checkbox-field__text">
-          <span class="checkbox-field__label">I'm a TA</span>
-          <span class="checkbox-field__hint">Reviews submissions and leaves comments.</span>
-        </span>
-      </label>
+      <fieldset class="role-field">
+        <legend class="role-field__legend">Role</legend>
 
-      <label class="checkbox-field">
-        <input v-model="isSupervisor" type="checkbox" />
-        <span class="checkbox-field__text">
-          <span class="checkbox-field__label">I'm a supervisor</span>
-          <span class="checkbox-field__hint">Creates assignments and rubrics.</span>
-        </span>
-      </label>
+        <label class="checkbox-field">
+          <input v-model="role" type="radio" name="role" value="student" />
+          <span class="checkbox-field__text">
+            <span class="checkbox-field__label">Student</span>
+            <span class="checkbox-field__hint">Submits work for review.</span>
+          </span>
+        </label>
+
+        <label class="checkbox-field">
+          <input v-model="role" type="radio" name="role" value="ta" />
+          <span class="checkbox-field__text">
+            <span class="checkbox-field__label">TA</span>
+            <span class="checkbox-field__hint">Reviews submissions and leaves comments.</span>
+          </span>
+        </label>
+
+        <label class="checkbox-field">
+          <input v-model="role" type="radio" name="role" value="supervisor" />
+          <span class="checkbox-field__text">
+            <span class="checkbox-field__label">Supervisor</span>
+            <span class="checkbox-field__hint">Creates assignments and rubrics.</span>
+          </span>
+        </label>
+      </fieldset>
 
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" :disabled="submitting">
@@ -146,5 +159,19 @@ async function onSubmit() {
 .auth-card__links {
   font-size: var(--text-sm);
   margin-top: var(--space-4);
+}
+
+.role-field {
+  border: none;
+  padding: 0;
+  margin: 0 0 var(--space-3);
+  min-width: 0;
+}
+
+.role-field__legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 </style>

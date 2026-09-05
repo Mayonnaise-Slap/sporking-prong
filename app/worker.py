@@ -2,12 +2,13 @@ import asyncio
 import logging
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import async_session_maker, init_db
 from app.jobs import JOB_HANDLERS
-from app.models import Job, Submission, _utcnow
+from app.models import Job, Submission, User, _utcnow
 
 logger = logging.getLogger("app.worker")
 
@@ -35,6 +36,27 @@ async def _claim_next_job(db: AsyncSession) -> Optional[Job]:
     return job
 
 
+async def _assign_least_loaded_reviewer(db: AsyncSession, submission: Submission) -> None:
+    staff_result = await db.exec(select(User).where(or_(User.is_ta, User.is_supervisor)))
+    staff = staff_result.all()
+    if not staff:
+        return
+
+    pending_result = await db.exec(
+        select(Submission).where(
+            Submission.assignment_id == submission.assignment_id,
+            Submission.review_status != "reviewed",
+            Submission.assigned_reviewer_id.is_not(None),
+        )
+    )
+    load_by_reviewer = {member.id: 0 for member in staff}
+    for pending in pending_result.all():
+        if pending.assigned_reviewer_id in load_by_reviewer:
+            load_by_reviewer[pending.assigned_reviewer_id] += 1
+
+    submission.assigned_reviewer_id = min(load_by_reviewer, key=lambda uid: (load_by_reviewer[uid], uid))
+
+
 async def _mark_submission_done_if_finished(db: AsyncSession, submission_id: int) -> None:
     remaining = await db.exec(
         select(Job).where(
@@ -47,6 +69,8 @@ async def _mark_submission_done_if_finished(db: AsyncSession, submission_id: int
 
     submission = await db.get(Submission, submission_id)
     submission.processed_status = "done"
+    if submission.assigned_reviewer_id is None:
+        await _assign_least_loaded_reviewer(db, submission)
     db.add(submission)
     await db.commit()
 

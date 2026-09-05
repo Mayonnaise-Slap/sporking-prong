@@ -120,6 +120,7 @@ class SubmissionPublic(BaseModel):
     id: int
     assignment_id: int
     student_id: int
+    student_full_name: Optional[str]
     attempt_number: int
     submitted_at: datetime
     original_file_id: int
@@ -127,8 +128,14 @@ class SubmissionPublic(BaseModel):
     processed_status: str
     line_count: Optional[int]
     is_empty: bool
+    assigned_reviewer_id: Optional[int]
     review_status: str
     created_at: datetime
+
+
+class SubmissionUpdate(BaseModel):
+    review_status: Optional[str] = None
+    assigned_reviewer_id: Optional[int] = None
 
 
 class JobPublic(BaseModel):
@@ -136,3 +143,66 @@ class JobPublic(BaseModel):
     job_type: str
     status: str
     result: Optional[dict]
+
+
+class CommentCreate(BaseModel):
+    start_line: int
+    end_line: int
+    body: str
+    status: str = "draft"
+    author_id: Optional[int] = None
+    source_comment_id: Optional[int] = None
+
+
+class CommentUpdate(BaseModel):
+    body: Optional[str] = None
+    status: Optional[str] = None
+
+
+class CommentPublic(BaseModel):
+    id: int
+    submission_id: int
+    start_line: int
+    end_line: int
+    body: str
+    author_id: Optional[int]
+    source_comment_id: Optional[int]
+    source_job_id: Optional[int]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    sent_at: Optional[datetime]
+
+
+class CriterionGradeView(BaseModel):
+    criterion_id: int
+    order_index: int
+    title: str
+    max_points: float
+    min_points: Optional[float]
+    status: str
+    comment: Optional[str]
+    updated_at: Optional[datetime]
+
+
+class PlagiarismMatchPublic(BaseModel):
+    id: int
+    matched_submission_id: int
+    similarity_pct: float
+    matched_spans: Optional[list]
+    note: Optional[str]
+    created_at: datetime
+
+
+class FinalGradeUpsert(BaseModel):
+    points: float
+    next_step: str = "grade"
+
+
+class FinalGradePublic(BaseModel):
+    id: int
+    submission_id: int
+    points: float
+    assigned_by_id: int
+    assigned_at: datetime
+    next_step: str
