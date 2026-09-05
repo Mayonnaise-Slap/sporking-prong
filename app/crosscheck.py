@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from rapidfuzz.distance import LCSseq
 
@@ -23,6 +23,17 @@ class CrossCheckConfig:
     min_docs_for_boilerplate: int = 5
     threshold_pct: float = 25.0
     max_matches: int = 5
+
+    @classmethod
+    def from_settings(cls, settings: Any) -> "CrossCheckConfig":
+        return cls(
+            min_block_tokens=settings.crosscheck_min_block_tokens,
+            merge_gap_tokens=settings.crosscheck_merge_gap_tokens,
+            boilerplate_doc_ratio=settings.crosscheck_boilerplate_doc_ratio,
+            min_docs_for_boilerplate=settings.crosscheck_min_docs_for_boilerplate,
+            threshold_pct=settings.crosscheck_threshold_pct,
+            max_matches=settings.crosscheck_max_matches,
+        )
 
 
 DEFAULT_CONFIG = CrossCheckConfig()
