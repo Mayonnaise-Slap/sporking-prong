@@ -2,7 +2,6 @@ import asyncio
 import logging
 from typing import Optional
 
-from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -37,8 +36,16 @@ async def _claim_next_job(db: AsyncSession) -> Optional[Job]:
 
 
 async def _assign_least_loaded_reviewer(db: AsyncSession, submission: Submission) -> None:
-    staff_result = await db.exec(select(User).where(or_(User.is_ta, User.is_supervisor)))
-    staff = staff_result.all()
+    # TAs do routine review work; a supervisor is a fallback for when no TA
+    # exists at all, not an equally-weighted candidate in the same pool —
+    # pooling them together let ties resolve to whichever role happened to
+    # have the lower user id, which in practice meant supervisors kept
+    # getting picked over TAs.
+    ta_result = await db.exec(select(User).where(User.is_ta))
+    staff = ta_result.all()
+    if not staff:
+        supervisor_result = await db.exec(select(User).where(User.is_supervisor))
+        staff = supervisor_result.all()
     if not staff:
         return
 
