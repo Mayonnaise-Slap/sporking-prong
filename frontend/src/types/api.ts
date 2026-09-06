@@ -156,15 +156,45 @@ export interface CrossCheckReport {
   matches: CrossCheckMatch[]
 }
 
+// "ai_check" job's result (app/aicheck.py AICheckReport.as_dict()), produced
+// by a locally-run GigaCheck classifier.
+//
+// The model window is 1024 tokens, so a submission is scored in chunks and
+// the two numbers answer different questions. `ai_score_pct` is the highest
+// chunk score — a single model-written section shouldn't average away.
+// `ai_text_pct` is the share of scored words sitting in flagged chunks, i.e.
+// how much of the work looks generated. `needs_review` follows the former.
+//
+// `status` is "ok" only when the model actually scored the text; "skipped"
+// (too short) and "unavailable" (weights missing or failed to load) both
+// carry zeroed numbers, so check it before rendering.
+export interface AICheckReport {
+  provider: string
+  status: 'ok' | 'skipped' | 'unavailable'
+  label: 'human' | 'ai' | 'unknown'
+  ai_score_pct: number
+  ai_text_pct: number
+  chunks_total: number
+  chunks_flagged: number
+  words_scored: number
+  words_total: number
+  truncated: boolean
+  needs_review: boolean
+  review_threshold_pct: number
+  // Line ranges of the chunks that scored above the threshold.
+  spans: Array<{ start_line: number; end_line: number; score_pct: number }>
+  detail: string | null
+}
+
 // GET /submissions/{id}/jobs — deliberately narrower than the Job ORM row:
 // no submission_id/created_at/started_at/finished_at/error_message. Result
 // shape is job_type-specific: a list of debrief items for "heuristics", a
-// CrossCheckReport object for "cross_check".
+// CrossCheckReport object for "cross_check", an AICheckReport for "ai_check".
 export interface JobPublic {
   id: number
   job_type: string
   status: string
-  result: HeuristicsCheckItem[] | CrossCheckReport | null
+  result: HeuristicsCheckItem[] | CrossCheckReport | AICheckReport | null
 }
 
 export interface CommentCreatePayload {
