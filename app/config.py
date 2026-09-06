@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     critic_max_findings: int = 20
     critic_match_threshold: float = 75.0
 
+    cross_commentor_context_lines: int = 5
+    cross_commentor_max_source_comments: int = 300
+    cross_commentor_max_quote_chars: int = 300
+    cross_commentor_max_matches: int = 20
+    cross_commentor_match_threshold: float = 75.0
+
     llm_base_url: str = "https://api.cerebras.ai/v1"
     llm_model: str = ""
     llm_api_key: str = ""

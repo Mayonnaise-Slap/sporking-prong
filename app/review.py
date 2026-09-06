@@ -25,15 +25,14 @@ class Review:
     points_high: float
     external_references: tuple[str, ...]
 
-    def as_dict(self, applied: Collection[int] = (), comments_written: int = 0) -> dict:
-        # `applied` and `comments_written` are outcomes of writing this review
-        # down, not part of the review itself — the caller knows them, so they
-        # come in rather than being stored here.
+    def as_dict(self, applied: Collection[int] = ()) -> dict:
+        # `applied` is an outcome of writing this review down, not part of the
+        # review itself — the caller knows it, so it comes in rather than
+        # being stored here.
         return {
             "summary": self.summary,
             "points_low": self.points_low,
             "points_high": self.points_high,
-            "comments_written": comments_written,
             "external_references": list(self.external_references),
             "findings": [finding.as_dict() for finding in self.findings],
             "verdicts": [
