@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Optional, Protocol, Sequence
+from typing import Any, Optional, Sequence
 
 from app.config import configure
+from app.critic import Finding
 from app.llm import LLMClient
-from app.references import references_block
+from app.references import external_references, references_block
 from app.schema import (
     Field,
-    Pass,
     array_field,
     as_list,
     as_object,
     build_prompt,
     clean_text,
     nullable_string,
+    strict_object,
 )
-from app.textmatch import DEFAULT_MATCH_THRESHOLD, locate
+from app.textmatch import DEFAULT_MATCH_THRESHOLD, TextIndex
 from app.prompts import GRADER_SYSTEM_PROMPT
 
 STATUSES = ("unmarked", "none", "partial", "full")
@@ -35,13 +36,6 @@ class GraderConfig:
 
 
 DEFAULT_GRADER_CONFIG = GraderConfig()
-
-
-class FindingLike(Protocol):
-    severity: str
-    problem: str
-    why_it_matters: Optional[str]
-    start_line: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -106,33 +100,13 @@ def _criterion_line(criterion: Criterion) -> str:
     return line
 
 
-def _findings_lines(findings: Sequence[FindingLike]) -> str:
+def _findings_lines(findings: Sequence[Finding]) -> str:
     lines = []
     for number, finding in enumerate(findings, start=1):
         where = f", стр. {finding.start_line}" if finding.start_line else ""
         why = f" — {finding.why_it_matters}" if finding.why_it_matters else ""
         lines.append(f"[{number}] ({finding.severity}{where}) {finding.problem}{why}")
     return "\n".join(lines)
-
-
-def build_user_prompt(
-    statement: str,
-    criteria: Sequence[Criterion],
-    work: str,
-    findings: Sequence[FindingLike] = (),
-    config: GraderConfig = DEFAULT_GRADER_CONFIG,
-) -> str:
-    sections = [
-        ("КРИТЕРИИ ОЦЕНИВАНИЯ", "\n".join(_criterion_line(item) for item in criteria)),
-        ("НАХОДКИ ПРЕДВАРИТЕЛЬНОЙ ПРОВЕРКИ", _findings_lines(findings)),
-    ]
-    return build_prompt(
-        statement,
-        work,
-        _result_fields(criteria, config),
-        sections=sections,
-        references=references_block(work),
-    )
 
 
 def _verdict_fields(
@@ -171,22 +145,6 @@ def _result_fields(criteria: Sequence[Criterion], config: GraderConfig) -> tuple
         Field("summary", nullable_string(config.max_summary_chars),
               "разбор работы в целом по правилам выше, не длиннее "
               f"{config.max_summary_chars} символов"),
-    )
-
-
-def grader_pass(
-    statement: str,
-    criteria: Sequence[Criterion],
-    work: str,
-    findings: Sequence[FindingLike] = (),
-    config: GraderConfig = DEFAULT_GRADER_CONFIG,
-) -> Pass:
-    return Pass(
-        name="grader",
-        system=GRADER_SYSTEM_PROMPT,
-        fields=_result_fields(criteria, config),
-        build_user=lambda: build_user_prompt(statement, criteria, work, findings, config),
-        parse=lambda payload: parse_result(payload, criteria, work, findings, config),
     )
 
 
@@ -239,7 +197,7 @@ def _finding_ids(raw: Any, count: int) -> tuple[int, ...]:
 def parse_verdicts(
     payload: Any,
     criteria: Sequence[Criterion],
-    findings: Sequence[FindingLike] = (),
+    findings: Sequence[Finding] = (),
     config: GraderConfig = DEFAULT_GRADER_CONFIG,
 ) -> tuple[Verdict, ...]:
     by_id = {item.id: item for item in criteria}
@@ -284,13 +242,14 @@ def parse_result(
     payload: Any,
     criteria: Sequence[Criterion],
     work: str = "",
-    findings: Sequence[FindingLike] = (),
+    findings: Sequence[Finding] = (),
     config: GraderConfig = DEFAULT_GRADER_CONFIG,
 ) -> GradingResult:
     data = as_object(payload, "grader")
     verdicts = []
+    index = TextIndex(work)
     for verdict in parse_verdicts(data, criteria, findings, config):
-        start, end = locate(verdict.evidence, work, config.match_threshold)
+        start, end = index.locate(verdict.evidence, config.match_threshold)
         verdicts.append(replace(verdict, evidence_start_line=start, evidence_end_line=end))
     return GradingResult(
         verdicts=tuple(verdicts),
@@ -316,9 +275,23 @@ async def grade(
     statement: str,
     criteria: Sequence[Criterion],
     work: str,
-    findings: Sequence[FindingLike] = (),
+    findings: Sequence[Finding] = (),
     config: GraderConfig = DEFAULT_GRADER_CONFIG,
+    *,
+    references: str | None = None,
 ) -> GradingResult:
     if not criteria:
         return GradingResult(verdicts=())
-    return await grader_pass(statement, criteria, work, findings, config).run(client)
+    fields = _result_fields(criteria, config)
+    sections = [
+        ("КРИТЕРИИ ОЦЕНИВАНИЯ", "\n".join(_criterion_line(item) for item in criteria)),
+        ("НАХОДКИ ПРЕДВАРИТЕЛЬНОЙ ПРОВЕРКИ", _findings_lines(findings)),
+    ]
+    if references is None:
+        references = references_block(external_references(work))
+    user = build_prompt(
+        statement, work, fields, sections=sections,
+        references=references,
+    )
+    payload = await client.complete(GRADER_SYSTEM_PROMPT, user, strict_object(fields))
+    return parse_result(payload, criteria, work, findings, config)

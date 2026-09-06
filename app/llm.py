@@ -20,21 +20,6 @@ class UnmarkedClient:
 
 
 SCHEMA_NAME = "response"
-
-
-def strict_object(properties: dict) -> dict:
-    """Strict json_schema mode wants closed objects with every field required."""
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": list(properties),
-        "properties": properties,
-    }
-
-
-def nullable_string(limit: int) -> dict:
-    return {"type": ["string", "null"], "maxLength": limit}
-
 MAX_RETRY_DELAY_SECONDS = 60.0
 
 

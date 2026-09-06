@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 from app.config import configure
 from app.llm import LLMClient
-from app.references import references_block
+from app.references import external_references, references_block
 from app.schema import (
     Field,
-    Pass,
     array_field,
     as_list,
     as_object,
     build_prompt,
     clean_text,
     nullable_string,
+    strict_object,
 )
-from app.textmatch import DEFAULT_MATCH_THRESHOLD, locate
+from app.textmatch import DEFAULT_MATCH_THRESHOLD, TextIndex
 from app.prompts import CRITIC_PROMPT
 
 SEVERITIES = ("critical", "major", "minor")
@@ -62,14 +62,6 @@ class Finding:
         }
 
 
-def build_critic_prompt(
-    statement: str, work: str, config: CriticConfig = DEFAULT_CRITIC_CONFIG
-) -> str:
-    return build_prompt(
-        statement, work, _critic_fields(config), references=references_block(work)
-    )
-
-
 def _finding_fields(config: CriticConfig) -> tuple[Field, ...]:
     return (
         Field("quote", {"type": "string", "maxLength": config.max_quote_chars},
@@ -91,22 +83,11 @@ def _critic_fields(config: CriticConfig) -> tuple[Field, ...]:
     )
 
 
-def critic_pass(
-    statement: str, work: str, config: CriticConfig = DEFAULT_CRITIC_CONFIG
-) -> Pass:
-    return Pass(
-        name="critic",
-        system=CRITIC_PROMPT,
-        fields=_critic_fields(config),
-        build_user=lambda: build_critic_prompt(statement, work, config),
-        parse=lambda payload: parse_findings(payload, work, config),
-    )
-
-
 def parse_findings(
     payload: Any, work: str = "", config: CriticConfig = DEFAULT_CRITIC_CONFIG
 ) -> tuple[Finding, ...]:
     findings: list[Finding] = []
+    index = TextIndex(work)
     for item in as_list(as_object(payload, "critic"), "findings", "critic"):
         if not isinstance(item, dict):
             continue
@@ -115,7 +96,7 @@ def parse_findings(
         if not quote or not problem:
             continue
         severity = item.get("severity")
-        start, end = locate(quote, work, config.match_threshold)
+        start, end = index.locate(quote, config.match_threshold)
         findings.append(
             Finding(
                 quote=quote,
@@ -136,7 +117,17 @@ async def critique(
     statement: str,
     work: str,
     config: CriticConfig = DEFAULT_CRITIC_CONFIG,
+    *,
+    references: str | None = None,
 ) -> tuple[Finding, ...]:
     if not work.strip():
         return ()
-    return await critic_pass(statement, work, config).run(client)
+    fields = _critic_fields(config)
+    if references is None:
+        references = references_block(external_references(work))
+    user = build_prompt(
+        statement, work, fields,
+        references=references,
+    )
+    payload = await client.complete(CRITIC_PROMPT, user, strict_object(fields))
+    return parse_findings(payload, work, config)

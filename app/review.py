@@ -13,7 +13,7 @@ from app.grader import (
     points_range,
 )
 from app.llm import LLMClient
-from app.references import external_references
+from app.references import external_references, references_block
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,12 @@ async def review_submission(
     answers the rubric's question and a section that exists but is wrong keeps
     full marks. The grader then scores with those findings in hand.
     """
-    findings = await critique(client, statement, work, critic_config)
-    draft = await grade(client, statement, criteria, work, findings, grader_config)
+    references = external_references(work)
+    block = references_block(references)
+    findings = await critique(client, statement, work, critic_config, references=block)
+    draft = await grade(
+        client, statement, criteria, work, findings, grader_config, references=block,
+    )
     low, high = points_range(draft.verdicts, criteria)
     return Review(
         findings=findings,
@@ -66,5 +70,5 @@ async def review_submission(
         summary=draft.summary,
         points_low=low,
         points_high=high,
-        external_references=external_references(work),
+        external_references=references,
     )

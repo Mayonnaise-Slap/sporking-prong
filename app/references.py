@@ -24,8 +24,7 @@ def external_references(text: str, limit: int = 10) -> tuple[str, ...]:
     return tuple(found)
 
 
-def references_block(work: str) -> str:
-    references = external_references(work)
+def references_block(references: tuple[str, ...]) -> str:
     if not references:
         return ""
     listed = "\n".join(f"[{n}] {ref}" for n, ref in enumerate(references, start=1))

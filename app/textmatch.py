@@ -15,7 +15,7 @@ def _fold(text: str) -> str:
     return "".join(char.lower() if len(char.lower()) == 1 else char for char in text)
 
 
-class _Flat:
+class TextIndex:
     def __init__(self, work: str) -> None:
         pieces: list[str] = []
         lines: list[int] = []
@@ -32,23 +32,20 @@ class _Flat:
         self.lower = _fold(self.text)
         self.line_of_char = lines
 
+    def locate(
+        self, quote: Optional[str], threshold: float = DEFAULT_MATCH_THRESHOLD,
+    ) -> tuple[Optional[int], Optional[int]]:
+        if not quote:
+            return None, None
+        return _locate(" ".join(quote.split()), self, threshold)
+
     def span(self, start: int, end: int) -> tuple[int, int]:
         first = min(max(start, 0), len(self.line_of_char) - 1)
         last = min(max(end - 1, first), len(self.line_of_char) - 1)
         return self.line_of_char[first], self.line_of_char[last]
 
 
-def locate(
-    quote: Optional[str],
-    work: str,
-    threshold: float = DEFAULT_MATCH_THRESHOLD,
-) -> tuple[Optional[int], Optional[int]]:
-    if not quote or not work:
-        return None, None
-    return _locate(" ".join(quote.split()), _Flat(work), threshold)
-
-
-def _locate(needle: str, flat: _Flat, threshold: float) -> tuple[Optional[int], Optional[int]]:
+def _locate(needle: str, flat: TextIndex, threshold: float) -> tuple[Optional[int], Optional[int]]:
     if not needle or not flat.line_of_char:
         return None, None
 
