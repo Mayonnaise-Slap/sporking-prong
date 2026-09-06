@@ -18,4 +18,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.52",
     "sqlmodel>=0.0.42",
     "uvicorn[standard]>=0.52.4",
+    # Локальная детекция ИИ (app/aicheck.py). Тяжёлые, но безальтернативные:
+    # self-hosted модель избавляет от оплаты за слово и от передачи работ
+    # студентов в зарубежный API.
+    "huggingface-hub>=0.36.0",
+    "safetensors>=0.7.0",
+    "sentencepiece>=0.2.1",
+    "torch>=2.9.0",
+    "transformers>=5.0.0",
 ]

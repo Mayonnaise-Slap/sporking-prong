@@ -5,6 +5,7 @@ import { apiClient } from '@/api/client'
 import { extractErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import type {
+  AICheckReport,
   AssignmentWithCriteria,
   CommentCreatePayload,
   CommentUpdatePayload,
@@ -79,6 +80,23 @@ const crossCheckReport = computed<CrossCheckReport | null>(() => {
   const job = jobs.value.find((j) => j.job_type === 'cross_check')
   return (job?.result as CrossCheckReport | undefined) ?? null
 })
+
+const aiCheckJob = computed(() => jobs.value.find((j) => j.job_type === 'ai_check') ?? null)
+
+const aiCheckReport = computed<AICheckReport | null>(
+  () => (aiCheckJob.value?.result as AICheckReport | undefined) ?? null,
+)
+
+const aiCheckRunning = computed(
+  () => aiCheckJob.value?.status === 'pending' || aiCheckJob.value?.status === 'running',
+)
+
+// Everything except "ok" zeroes the numbers, so the panel explains itself
+// rather than rendering a misleading 0%.
+const aiCheckExcuse: Record<string, string> = {
+  skipped: 'Not scored — the submission is too short for a meaningful verdict.',
+  unavailable: 'Not scored — the detector model is unavailable.',
+}
 
 function criterionBadgeClass(status: string) {
   switch (status) {
@@ -364,14 +382,70 @@ async function loadAll() {
     loadError.value = extractErrorMessage(err, 'Could not load this submission.')
   } finally {
     loading.value = false
+    startJobsPoll()
   }
+}
+
+// Uploading only enqueues the jobs; the worker runs them afterwards, and
+// ai_check alone takes over a minute. Without this poll a page opened right
+// after submission would show "not yet evaluated" until a manual reload.
+const JOBS_POLL_MS = 3000
+// Ten minutes — well past the worst case, where a cold worker loads the
+// detector before scoring, but bounded so a stuck job can't leave a forgotten
+// tab polling forever.
+const JOBS_POLL_MAX_TICKS = 200
+
+let jobsPollTimer: number | null = null
+let jobsPollTicks = 0
+
+// An empty list counts as settled: submissions created before a handler
+// existed have no such job and will never get one on their own.
+const jobsSettled = computed(() =>
+  jobs.value.every((job) => job.status === 'succeeded' || job.status === 'failed'),
+)
+
+function stopJobsPoll() {
+  if (jobsPollTimer !== null) {
+    window.clearInterval(jobsPollTimer)
+    jobsPollTimer = null
+  }
+}
+
+async function pollJobs() {
+  if (++jobsPollTicks > JOBS_POLL_MAX_TICKS) {
+    stopJobsPoll()
+    return
+  }
+  try {
+    const [{ data: jobsData }, { data: sub }] = await Promise.all([
+      apiClient.get<JobPublic[]>(`/submissions/${props.id}/jobs`),
+      apiClient.get<SubmissionPublic>(`/submissions/${props.id}`),
+    ])
+    jobs.value = jobsData
+    // Just this field: replacing the whole row would wipe the reviewer's
+    // unsaved draft, which is seeded from it.
+    if (submission.value) submission.value.processed_status = sub.processed_status
+  } catch {
+    // A dropped poll needs no banner — the next tick retries, and the page
+    // still shows whatever the initial load returned.
+  }
+  if (jobsSettled.value) stopJobsPoll()
+}
+
+function startJobsPoll() {
+  if (jobsPollTimer !== null || jobsSettled.value) return
+  jobsPollTicks = 0
+  jobsPollTimer = window.setInterval(pollJobs, JOBS_POLL_MS)
 }
 
 onMounted(() => {
   loadAll()
   window.addEventListener('mouseup', onWindowMouseUp)
 })
-onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
+onUnmounted(() => {
+  stopJobsPoll()
+  window.removeEventListener('mouseup', onWindowMouseUp)
+})
 </script>
 
 <template>
@@ -511,6 +585,55 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
           <p v-else class="text-muted">N/A &mdash; not yet evaluated.</p>
         </section>
 
+        <section v-if="isStaff" class="card card-pad">
+          <p class="card-label">AI-generation signal</p>
+          <template v-if="aiCheckReport && aiCheckReport.status === 'ok'">
+            <div class="review-debrief__badges">
+              <span class="badge" :class="aiCheckReport.needs_review ? 'badge-warning' : 'badge-success'">
+                {{ aiCheckReport.ai_score_pct }}% peak score
+              </span>
+              <span
+                v-if="aiCheckReport.chunks_flagged > 0"
+                class="badge badge-neutral"
+                title="Share of the scored words sitting in chunks that landed above the threshold."
+              >
+                {{ aiCheckReport.ai_text_pct }}% of the text
+              </span>
+              <span
+                v-if="aiCheckReport.truncated"
+                class="badge badge-neutral"
+                title="The model window is 1024 tokens, so a long submission is scored in chunks up to a cap."
+              >
+                scored {{ aiCheckReport.words_scored }} of {{ aiCheckReport.words_total }} words
+              </span>
+            </div>
+            <p class="text-muted review-debrief__threshold">
+              {{ aiCheckReport.chunks_flagged }} of {{ aiCheckReport.chunks_total }} chunk(s) above threshold
+              &middot; warns above {{ aiCheckReport.review_threshold_pct }}% &middot; {{ aiCheckReport.provider }},
+              run locally
+            </p>
+            <ul v-if="aiCheckReport.spans.length > 0" class="review-debrief__list">
+              <li v-for="(span, index) in aiCheckReport.spans" :key="index">
+                <span class="badge badge-neutral">{{ span.score_pct }}%</span>
+                <span class="text-muted">
+                  {{ span.start_line === span.end_line ? `line ${span.start_line}` : `lines ${span.start_line}–${span.end_line}` }}
+                </span>
+              </li>
+            </ul>
+          </template>
+          <p v-else-if="aiCheckReport" class="text-muted">
+            {{ aiCheckExcuse[aiCheckReport.status] ?? 'Not scored.' }}
+            <span v-if="aiCheckReport.detail">({{ aiCheckReport.detail }})</span>
+          </p>
+          <p v-else-if="aiCheckRunning" class="text-muted">
+            Scoring&hellip; the detector takes about a minute, and this panel updates on its own.
+          </p>
+          <p v-else-if="aiCheckJob?.status === 'failed'" class="text-muted">
+            Scoring failed &mdash; the reason is in the worker log, not in this response.
+          </p>
+          <p v-else class="text-muted">N/A &mdash; not yet evaluated.</p>
+        </section>
+
         <section class="card card-pad">
           <p class="card-label">Pre-checks</p>
           <ul class="review-debrief__list">
@@ -524,95 +647,13 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
         </section>
       </div>
 
-      <div class="review-columns" :class="{ 'review-columns--no-rubric': !isStaff }">
-        <aside class="review-aside card card-pad">
+      <div class="review-context" :class="{ 'review-context--no-rubric': !isStaff }">
+        <section class="card card-pad review-context__panel">
           <p class="card-label">Assignment condition</p>
           <pre class="review-condition text-mono">{{ assignment.condition_markdown }}</pre>
-        </aside>
-
-        <section class="card review-main">
-          <div class="review-main__head">
-            <p class="card-label">{{ submission.line_count ?? 0 }} lines</p>
-            <p v-if="canGrade" class="text-muted review-main__hint">Drag on the line numbers to comment on a range</p>
-          </div>
-
-          <p v-if="commentsError" class="form-banner form-banner-error review-main__error">{{ commentsError }}</p>
-
-          <div class="review-text">
-            <template v-for="(line, idx) in textLines" :key="idx">
-              <div
-                class="review-line"
-                :class="[
-                  lineRangeInfo[idx + 1] ? `review-line--${lineRangeInfo[idx + 1].status}` : '',
-                  { 'review-line--range-start': lineRangeInfo[idx + 1]?.isStart },
-                  { 'review-line--range-end': lineRangeInfo[idx + 1]?.isEnd },
-                ]"
-              >
-                <span
-                  class="review-line__gutter text-mono text-muted"
-                  :class="{ 'review-line__gutter--draggable': canGrade }"
-                  @mousedown="onGutterMouseDown(idx + 1)"
-                  @mouseenter="onGutterMouseEnter(idx + 1)"
-                  >{{ idx + 1 }}</span
-                >
-                <span class="review-line__content text-mono">{{ line || ' ' }}</span>
-              </div>
-
-              <article
-                v-for="comment in commentsByEndLine[idx + 1] || []"
-                :key="comment.id"
-                class="review-comment"
-                :class="[`review-comment--${comment.status}`, { 'review-comment--auto': comment.source_job_id }]"
-              >
-                <div class="review-comment__head">
-                  <span class="badge" :class="`badge-${comment.status === 'sent' ? 'success' : comment.status === 'suggested' ? 'warning' : comment.status === 'dismissed' ? 'danger' : 'neutral'}`">
-                    {{ comment.status }}
-                  </span>
-                  <span v-if="comment.source_job_id" class="badge badge-primary">auto-suggested</span>
-                  <span class="text-muted">{{ userLabel(comment.author_id) ?? 'unassigned' }}</span>
-                </div>
-
-                <div v-if="editingCommentId === comment.id" class="review-comment__edit">
-                  <textarea v-model="commentDraft.body" class="textarea"></textarea>
-                  <select v-model="commentDraft.status" class="input">
-                    <option value="draft">draft</option>
-                    <option value="suggested">suggested</option>
-                    <option value="sent">sent</option>
-                    <option value="dismissed">dismissed</option>
-                  </select>
-                  <div class="form-actions">
-                    <button type="button" class="btn btn-primary btn-sm" @click="saveCommentEdit(comment)">Save</button>
-                    <button type="button" class="btn btn-outline btn-sm" @click="cancelEditComment">Cancel</button>
-                  </div>
-                </div>
-                <p v-else class="review-comment__body">{{ comment.body }}</p>
-
-                <div v-if="canGrade && editingCommentId !== comment.id" class="review-comment__actions">
-                  <button type="button" class="btn btn-outline btn-sm" @click="startEditComment(comment)">Edit</button>
-                  <button type="button" class="btn btn-outline btn-sm" @click="removeComment(comment)">Delete</button>
-                </div>
-              </article>
-
-              <article v-if="composerRange && composerRange.end === idx + 1" class="review-comment review-comment--composer">
-                <p class="text-muted review-comment__range">
-                  Commenting on lines {{ composerRange.start }}&ndash;{{ composerRange.end }}
-                </p>
-                <textarea v-model="composerBody" class="textarea" placeholder="Leave a comment…" autofocus></textarea>
-                <div class="form-actions">
-                  <button type="button" class="btn btn-outline btn-sm" :disabled="addingComment" @click="submitComposer('draft')">
-                    Save draft
-                  </button>
-                  <button type="button" class="btn btn-primary btn-sm" :disabled="addingComment" @click="submitComposer('sent')">
-                    Send
-                  </button>
-                  <button type="button" class="btn btn-outline btn-sm" @click="cancelComposer">Cancel</button>
-                </div>
-              </article>
-            </template>
-          </div>
         </section>
 
-        <aside v-if="isStaff" class="review-aside card card-pad">
+        <section v-if="isStaff" class="card card-pad review-context__panel">
           <p class="card-label">Rubric</p>
           <ul class="grade-list">
             <li v-for="grade in criterionGrades" :key="grade.criterion_id" class="grade-row">
@@ -625,8 +666,90 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
             </li>
             <li v-if="criterionGrades.length === 0" class="text-muted">No rubric criteria yet.</li>
           </ul>
-        </aside>
+        </section>
       </div>
+
+      <section class="card review-main">
+        <div class="review-main__head">
+          <p class="card-label">{{ submission.line_count ?? 0 }} lines</p>
+          <p v-if="canGrade" class="text-muted review-main__hint">Drag on the line numbers to comment on a range</p>
+        </div>
+
+        <p v-if="commentsError" class="form-banner form-banner-error review-main__error">{{ commentsError }}</p>
+
+        <div class="review-text">
+          <template v-for="(line, idx) in textLines" :key="idx">
+            <div
+              class="review-line"
+              :class="[
+                lineRangeInfo[idx + 1] ? `review-line--${lineRangeInfo[idx + 1].status}` : '',
+                { 'review-line--range-start': lineRangeInfo[idx + 1]?.isStart },
+                { 'review-line--range-end': lineRangeInfo[idx + 1]?.isEnd },
+              ]"
+            >
+              <span
+                class="review-line__gutter text-mono text-muted"
+                :class="{ 'review-line__gutter--draggable': canGrade }"
+                @mousedown="onGutterMouseDown(idx + 1)"
+                @mouseenter="onGutterMouseEnter(idx + 1)"
+                >{{ idx + 1 }}</span
+              >
+              <span class="review-line__content text-mono">{{ line || ' ' }}</span>
+            </div>
+
+            <article
+              v-for="comment in commentsByEndLine[idx + 1] || []"
+              :key="comment.id"
+              class="review-comment"
+              :class="[`review-comment--${comment.status}`, { 'review-comment--auto': comment.source_job_id }]"
+            >
+              <div class="review-comment__head">
+                <span class="badge" :class="`badge-${comment.status === 'sent' ? 'success' : comment.status === 'suggested' ? 'warning' : comment.status === 'dismissed' ? 'danger' : 'neutral'}`">
+                  {{ comment.status }}
+                </span>
+                <span v-if="comment.source_job_id" class="badge badge-primary">auto-suggested</span>
+                <span class="text-muted">{{ userLabel(comment.author_id) ?? 'unassigned' }}</span>
+              </div>
+
+              <div v-if="editingCommentId === comment.id" class="review-comment__edit">
+                <textarea v-model="commentDraft.body" class="textarea"></textarea>
+                <select v-model="commentDraft.status" class="input">
+                  <option value="draft">draft</option>
+                  <option value="suggested">suggested</option>
+                  <option value="sent">sent</option>
+                  <option value="dismissed">dismissed</option>
+                </select>
+                <div class="form-actions">
+                  <button type="button" class="btn btn-primary btn-sm" @click="saveCommentEdit(comment)">Save</button>
+                  <button type="button" class="btn btn-outline btn-sm" @click="cancelEditComment">Cancel</button>
+                </div>
+              </div>
+              <p v-else class="review-comment__body">{{ comment.body }}</p>
+
+              <div v-if="canGrade && editingCommentId !== comment.id" class="review-comment__actions">
+                <button type="button" class="btn btn-outline btn-sm" @click="startEditComment(comment)">Edit</button>
+                <button type="button" class="btn btn-outline btn-sm" @click="removeComment(comment)">Delete</button>
+              </div>
+            </article>
+
+            <article v-if="composerRange && composerRange.end === idx + 1" class="review-comment review-comment--composer">
+              <p class="text-muted review-comment__range">
+                Commenting on lines {{ composerRange.start }}&ndash;{{ composerRange.end }}
+              </p>
+              <textarea v-model="composerBody" class="textarea" placeholder="Leave a comment…" autofocus></textarea>
+              <div class="form-actions">
+                <button type="button" class="btn btn-outline btn-sm" :disabled="addingComment" @click="submitComposer('draft')">
+                  Save draft
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" :disabled="addingComment" @click="submitComposer('sent')">
+                  Send
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" @click="cancelComposer">Cancel</button>
+              </div>
+            </article>
+          </template>
+        </div>
+      </section>
 
       <section v-if="isStaff" class="card card-pad final-grade-card">
         <p class="card-label">Final grade</p>
@@ -791,21 +914,22 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
 }
 
 /* ---- Three-column review layout ---- */
-.review-columns {
+/* Condition and rubric sit above the text rather than beside it, so the
+   submission itself gets the full page width. Both scroll internally: a long
+   condition must not push the text off-screen. */
+.review-context {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
 
-.review-columns--no-rubric {
-  grid-template-columns: 300px minmax(0, 1fr);
+.review-context--no-rubric {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.review-aside {
-  position: sticky;
-  top: calc(var(--header-height) + var(--space-4));
-  max-height: calc(100vh - var(--header-height) - var(--space-8));
+.review-context__panel {
+  max-height: 320px;
   overflow-y: auto;
 }
 
@@ -1027,14 +1151,8 @@ onUnmounted(() => window.removeEventListener('mouseup', onWindowMouseUp))
 }
 
 @media (max-width: 1000px) {
-  .review-columns,
-  .review-columns--no-rubric {
+  .review-context {
     grid-template-columns: 1fr;
-  }
-
-  .review-aside {
-    position: static;
-    max-height: none;
   }
 }
 </style>

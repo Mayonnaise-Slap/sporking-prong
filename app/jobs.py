@@ -3,6 +3,7 @@ from typing import Awaitable, Callable, Sequence
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.aicheck import AICheckConfig, check_text
 from app.config import get_settings
 from app.critic import CriticConfig
 from app.cross_commentor import CrossCommentorConfig, Match, SourceMistake, extract_context, find_cross_matches
@@ -264,9 +265,26 @@ async def run_cross_commentor_job(db: AsyncSession, job_id: int) -> None:
     db.add(job)
 
 
+async def run_ai_check_job(db: AsyncSession, job_id: int) -> None:
+    job = await db.get(Job, job_id)
+    submission = await db.get(Submission, job.submission_id)
+
+    job.started_at = _utcnow()
+    report = await check_text(
+        submission.processed_text,
+        AICheckConfig.from_settings(get_settings()),
+    )
+
+    job.result = report.as_dict()
+    job.status = "succeeded"
+    job.finished_at = _utcnow()
+    db.add(job)
+
+
 JOB_HANDLERS: dict[str, Callable[[AsyncSession, int], Awaitable[None]]] = {
     "heuristics": run_heuristics_job,
     "cross_check": run_cross_check_job,
     "grader": run_grader_job,
     "cross_commentor": run_cross_commentor_job,
+    "ai_check": run_ai_check_job,
 }

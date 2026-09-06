@@ -61,12 +61,9 @@ export interface SubmissionFile {
   created_at: string
 }
 
-export type JobType =
-  | 'heuristics'
-  | 'cross_check'
-  | 'ai_detection'
-  | 'common_mistake_scan'
-  | 'rubric_grading'
+// The keys of app/jobs.py JOB_HANDLERS — a submission enqueues one job per
+// entry, so this list is exhaustive.
+export type JobType = 'heuristics' | 'cross_check' | 'grader' | 'ai_check'
 
 export type JobStatus = 'pending' | 'running' | 'succeeded' | 'failed'
 

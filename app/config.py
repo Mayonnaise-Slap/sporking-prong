@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 6000
     llm_max_retries: int = 3
 
+    aicheck_model_dir: str = ""
+    aicheck_device: str = ""
+    aicheck_review_threshold_pct: float = 60.0
+    aicheck_min_words: int = 200
+    aicheck_max_chunks: int = 6
+    aicheck_min_chunk_words: int = 200
+
     secret_key: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
