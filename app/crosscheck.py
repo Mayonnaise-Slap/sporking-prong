@@ -4,9 +4,11 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from rapidfuzz.distance import LCSseq
+
+from app.config import configure
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -23,6 +25,10 @@ class CrossCheckConfig:
     min_docs_for_boilerplate: int = 5
     threshold_pct: float = 25.0
     max_matches: int = 5
+
+    @classmethod
+    def from_settings(cls, settings: Any) -> "CrossCheckConfig":
+        return configure(cls, settings, "crosscheck")
 
 
 DEFAULT_CONFIG = CrossCheckConfig()
